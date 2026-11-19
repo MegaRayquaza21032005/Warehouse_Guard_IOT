@@ -1,0 +1,68 @@
+# Hạ tầng phát triển: PostgreSQL (pgvector) + Mosquitto + pgAdmin
+# Chạy:   docker compose up -d
+# Dừng:   docker compose down          (giữ dữ liệu)
+# Xóa DB: docker compose down -v       (MẤT dữ liệu PostgreSQL, pgAdmin)
+#
+# Biến lấy từ file .env ở cùng thư mục.
+
+name: warehouse-iot
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: warehouse-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_SUPERUSER}
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD}
+      # Dùng trong postgres/init/01-init.sh để tạo tài khoản cho từng service
+      POSTGRES_BACKEND_USER: ${POSTGRES_BACKEND_USER}
+      POSTGRES_BACKEND_PASSWORD: ${POSTGRES_BACKEND_PASSWORD}
+      POSTGRES_AGENT_USER: ${POSTGRES_AGENT_USER}
+      POSTGRES_AGENT_PASSWORD: ${POSTGRES_AGENT_PASSWORD}
+      TZ: Asia/Ho_Chi_Minh
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT}:5432"   # chỉ mở cho máy local
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mosquitto:
+    image: eclipse-mosquitto:2.0.20
+    container_name: warehouse-mosquitto
+    restart: unless-stopped
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    ports:
+      - "${MQTT_PORT}:1883"                  # mở ra LAN để ESP32 kết nối
+      - "127.0.0.1:${MQTT_WS_PORT}:9001"     # WebSocket, chỉ local (dev)
+    volumes:
+      - ./mqtt-broker/config:/mosquitto/config
+      - ./mqtt-broker/data:/mosquitto/data
+      - ./mqtt-broker/log:/mosquitto/log
+
+  pgadmin:
+    image: dpage/pgadmin4:8.14
+    container_name: warehouse-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
+      PGADMIN_CONFIG_SERVER_MODE: "True"
+    ports:
+      - "127.0.0.1:${PGADMIN_PORT}:80"       # chỉ mở cho máy local
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+      - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  pgadmin-data:

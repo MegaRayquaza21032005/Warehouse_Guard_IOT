@@ -1,0 +1,42 @@
+# ===== Bí mật =====
+.env
+firmware/**/secrets.h
+mqtt-broker/config/passwd
+
+# ===== Dữ liệu runtime =====
+mqtt-broker/data/*
+!mqtt-broker/data/.gitkeep
+mqtt-broker/log/*
+!mqtt-broker/log/.gitkeep
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ===== Java =====
+backend/target/
+backend/build/
+backend/.gradle/
+*.class
+
+# ===== Node =====
+node_modules/
+dist/
+.expo/
+*.tsbuildinfo
+
+# ===== Mobile build =====
+frontend/mobile/android/app/build/
+frontend/mobile/ios/Pods/
+frontend/mobile/ios/build/
+
+# ===== IDE / OS =====
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+*.log

@@ -1,0 +1,13 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "Warehouse DB",
+      "Group": "Warehouse IoT",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "warehouse",
+      "Username": "postgres",
+      "SSLMode": "prefer"
+    }
+  }
+}

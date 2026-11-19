@@ -1,0 +1,31 @@
+# Conda env riêng cho AI Agent — KHÔNG dùng chung env khác.
+# Tạo:      conda env create -f ai-agent/environment.yml
+# Cập nhật: conda env update -f ai-agent/environment.yml --prune
+# Kích hoạt: conda activate iot-agent
+# Phiên bản đã cài thực tế được ghi lại trong ai-agent/requirements.lock.txt
+name: iot-agent
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+      # Web API
+      - fastapi
+      - uvicorn[standard]
+      - sse-starlette
+      # Cấu hình
+      - pydantic-settings
+      - python-dotenv
+      # Kết nối
+      - paho-mqtt>=2.0
+      - httpx
+      - psycopg[binary,pool]
+      # LLM / multi-agent / memory
+      - openai
+      - langchain-openai
+      - langgraph
+      - langgraph-checkpoint-postgres
+      # Kiểm thử
+      - pytest
+      - pytest-asyncio
