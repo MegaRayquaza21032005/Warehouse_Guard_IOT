@@ -19,6 +19,23 @@ ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 TOPIC = "warehouse/cmd/config"
 TIMEOUT_S = 5
 
+# Khóa JSON trong cmd/config (CLAUDE.md mục 4) -> (biến .env, kiểu)
+# Biến nào để trống / không có trong .env thì không gửi (ESP32 giữ giá trị cũ).
+FIRMWARE_KEYS = {
+    "mq2Warning":        ("MQ2_WARNING", int),
+    "mq2Danger":         ("MQ2_DANGER", int),
+    "tempHigh":          ("TEMP_HIGH", float),
+    "humHigh":           ("HUM_HIGH", float),
+    "tempRiseC":         ("TEMP_RISE_C", float),
+    "tempRiseWindowMin": ("TEMP_RISE_WINDOW_MIN", int),
+    "mistFireMaxMin":    ("MIST_FIRE_MAX_MIN", int),
+    "mistCoolMaxMin":    ("MIST_COOL_MAX_MIN", int),
+    "mistCooldownMin":   ("MIST_COOLDOWN_MIN", int),
+    "mistHumMax":        ("MIST_HUM_MAX", float),
+    "humFanCheckMin":    ("HUM_FAN_CHECK_MIN", int),
+    "humFanMinDrop":     ("HUM_FAN_MIN_DROP", float),
+}
+
 
 def load_env(path: Path) -> dict[str, str]:
     env = {}
@@ -34,12 +51,11 @@ def load_env(path: Path) -> dict[str, str]:
 def main() -> int:
     env = load_env(ENV_PATH)
 
-    payload = json.dumps({
-        "mq2Warning": int(env["MQ2_WARNING"]),
-        "mq2Danger": int(env["MQ2_DANGER"]),
-        "tempHigh": float(env["TEMP_HIGH"]),
-        "humHigh": float(env["HUM_HIGH"]),
-    })
+    payload_dict = {}
+    for json_key, (env_key, cast) in FIRMWARE_KEYS.items():
+        if env.get(env_key, "") != "":
+            payload_dict[json_key] = cast(env[env_key])
+    payload = json.dumps(payload_dict)
     host = env.get("MQTT_HOST", "localhost")
     port = int(env.get("MQTT_PORT", "1883"))
 
