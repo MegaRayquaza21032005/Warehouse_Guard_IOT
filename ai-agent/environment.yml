@@ -26,6 +26,8 @@ dependencies:
       - langchain-openai
       - langgraph
       - langgraph-checkpoint-postgres
+      # Tracing
+      - langfuse
       # Kiểm thử
       - pytest
       - pytest-asyncio
