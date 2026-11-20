@@ -46,6 +46,7 @@ class RuleRuntime:
         self.messages = 0
         self.started_at = time.time()
         self._tasks: list[asyncio.Task] = []
+        self._ack_waiters: dict[str, asyncio.Future] = {}
 
     def start(self) -> None:
         self._tasks = [asyncio.create_task(self.consume(), name="rules-consume"),
@@ -68,6 +69,7 @@ class RuleRuntime:
                 await self.execute(self.engine.on_message(topic, data, time.time()))
             except Exception:  # noqa: BLE001 — một bản tin lỗi không được làm dừng tầng luật
                 log.exception("Lỗi xử lý %s", topic)
+            self._resolve_ack(data)
 
     async def ticker(self) -> None:
         while True:
@@ -86,6 +88,25 @@ class RuleRuntime:
                 esc_log.warning("Không kiểm tra được cảnh báo chưa xem (Java BE: %s): %s",
                                 self.s.backend_base_url, e)
             await asyncio.sleep(ESCALATION_POLL_S)
+
+    # ------------------------------------------------------------------ chờ ESP32 xác nhận lệnh
+    def _resolve_ack(self, data: dict[str, Any]) -> None:
+        ack = data.get("ack")
+        if isinstance(ack, dict) and ack.get("trace_id"):
+            fut = self._ack_waiters.pop(str(ack["trace_id"]), None)
+            if fut is not None and not fut.done():
+                fut.set_result(str(ack.get("result")))
+
+    async def wait_ack(self, trace_id: str, timeout_s: float) -> str | None:
+        """Chờ status/* có ack.trace_id = trace_id. Trả ack.result hoặc None nếu quá hạn."""
+        fut = asyncio.get_running_loop().create_future()
+        self._ack_waiters[trace_id] = fut
+        try:
+            return await asyncio.wait_for(fut, timeout_s)
+        except asyncio.TimeoutError:
+            return None
+        finally:
+            self._ack_waiters.pop(trace_id, None)
 
     # ------------------------------------------------------------------ thực thi
     async def execute(self, actions: list[Action]) -> None:

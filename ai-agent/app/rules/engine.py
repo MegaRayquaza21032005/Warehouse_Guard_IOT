@@ -71,6 +71,7 @@ class RuleEngine:
         self.schedule = schedule
         self.new_id = new_id
         self.thresholds = {"tempHigh": 38.0, "humHigh": 80.0}
+        self.device_config: dict[str, Any] = {}     # status/config đầy đủ (Safety Guard dùng)
 
         self.safety = "normal"
         self.faults: set[str] = set()
@@ -121,6 +122,7 @@ class RuleEngine:
             elif name == "online":
                 self._on_online(data.get("status") == "online", now, acts)
             elif name == "config" and "error" not in data:
+                self.device_config = dict(data)
                 for k in ("tempHigh", "humHigh"):
                     if _num(data.get(k)) is not None:
                         self.thresholds[k] = float(data[k])
@@ -391,7 +393,12 @@ class RuleEngine:
             "pendingCommands": len(self.pending_cmds),
             "window": {"climate": len(self.climate), "mq2": len(self.mq2)},
             "latest": self._sensor_snapshot(),
+            "devices": {k: {f: v.get(f) for f in ("state", "mode", "reason", "source")} for k, v in self.devices.items()},
         }
+
+    def latest_climate(self) -> tuple[float, float, float] | None:
+        """(ts, temp, hum) gần nhất hoặc None."""
+        return self.climate[-1] if self.climate else None
 
 
 def _num(v: Any) -> float | None:

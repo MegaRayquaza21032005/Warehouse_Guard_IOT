@@ -74,9 +74,11 @@ class ToolCallLogger:
 
     async def update(self, call: ToolCall, status: str, *, result: Any = None, error: str | None = None,
                      confirmed_by: int | None = None) -> None:
-        ms = int((time.monotonic() - call.started) * 1000)
+        # started = 0: ToolCall dựng lại sau khi người dùng xác nhận -> tính thời gian từ started_at trong DB
+        ms = int((time.monotonic() - call.started) * 1000) if call.started else None
         (log.error if status in ("error", "blocked_by_policy") else log.info)(
-            "%s.%s %s (%dms)%s", call.agent, call.tool, status, ms, f" — {error}" if error else "")
+            "%s.%s %s%s%s", call.agent, call.tool, status, f" ({ms}ms)" if ms is not None else "",
+            f" — {error}" if error else "")
         if self.pool is None or not call.logged:
             return
         try:
@@ -84,7 +86,8 @@ class ToolCallLogger:
                 await conn.execute(
                     """UPDATE agent.tool_call_logs
                        SET status = %s, result = COALESCE(%s::jsonb, result), error = %s,
-                           confirmed_by = COALESCE(%s, confirmed_by), finished_at = now(), duration_ms = %s
+                           confirmed_by = COALESCE(%s, confirmed_by), finished_at = now(),
+                           duration_ms = COALESCE(%s, (EXTRACT(EPOCH FROM now() - started_at) * 1000)::int)
                        WHERE id = %s""",
                     (status, None if result is None else _json(result), error, confirmed_by, ms, call.id))
         except Exception as e:  # noqa: BLE001

@@ -63,7 +63,7 @@ def setup_logging(level: str = "INFO", fmt: str = "text") -> None:
     root.handlers[:] = [handler]
     root.setLevel(level.upper())
     # Bớt ồn từ thư viện
-    for noisy in ("httpx", "httpcore", "uvicorn.access", "psycopg.pool"):
+    for noisy in ("httpx", "httpx2", "httpcore", "openai", "langfuse", "uvicorn.access", "psycopg.pool"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 

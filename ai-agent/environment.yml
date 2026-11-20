@@ -14,6 +14,7 @@ dependencies:
       - fastapi
       - uvicorn[standard]
       - sse-starlette
+      - python-multipart     # upload ghi âm (STT)
       # Cấu hình
       - pydantic-settings
       - python-dotenv

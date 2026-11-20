@@ -12,7 +12,7 @@ cd backend
 mvn spring-boot:run                  # hoặc: mvn package -DskipTests && java -jar target/backend-0.0.1-SNAPSHOT.jar
 ```
 
-- Cấu hình đọc từ `../.env` (phải chạy trong thư mục `backend/`): `POSTGRES_*`, `MQTT_BACKEND_*`, `JWT_SECRET`, `JWT_ACCESS_TTL_MIN`, `JWT_REFRESH_TTL_DAYS`, `INTERNAL_API_KEY`, `WORK_HOURS_*`, `WORK_DAYS`, `CORS_ALLOWED_ORIGINS`, `BACKEND_PORT` (8080).
+- Cấu hình đọc từ `../.env` (phải chạy trong thư mục `backend/`): `POSTGRES_*`, `MQTT_BACKEND_*`, `JWT_SECRET`, `JWT_ACCESS_TTL_MIN`, `JWT_REFRESH_TTL_DAYS`, `INTERNAL_API_KEY`, `WORK_HOURS_*`, `WORK_DAYS`, `CORS_ALLOWED_ORIGINS`, `BACKEND_PORT` (8080), `AGENT_PORT` / `AGENT_URL` (AI Agent, mặc định `http://localhost:8000`).
 - Migration Flyway tự chạy khi khởi động (`src/main/resources/db/migration`).
 - Broker chưa chạy → app vẫn khởi động, tự kết nối lại mỗi 5 giây.
 
@@ -91,6 +91,30 @@ Lỗi luôn có dạng `{"error": "<mã>", "message": "...", "details": {...}}`.
 - Mặc định 24 giờ gần nhất. `dayOfWeek`: 1 = thứ Hai … 7 = Chủ nhật.
 
 `GET /api/stats/timeline?device=fan&from&to` → `[{"start","end","state","reason","source"}]` (biểu đồ `timeline`).
+
+### Chatbot, giọng nói, nhật ký agent — trung gian tới AI Agent
+
+Java BE gắn `user_id` (và `username`) **lấy từ JWT** rồi gọi ai-agent bằng `X-Internal-Key`. Khóa nội bộ không dùng được các API này (403). AI Agent chưa chạy → 503 `agent_unavailable` (cảnh báo và nút điều khiển vẫn hoạt động).
+
+| Method | Path | Ghi chú |
+|--------|------|---------|
+| POST | `/api/chat` | Body `{"message", "threadId"?, "inputMode": "text"\|"voice"}` (message 1–2000 ký tự; không có `threadId` = hội thoại mới). Trả **`text/event-stream`** chuyển tiếp nguyên văn từ agent |
+| POST | `/api/chat/{threadId}/confirm` | Body `{"approved": true\|false}` — bấm [Đồng ý] / [Hủy]. Trả SSE |
+| GET | `/api/chat/threads?limit` | Hội thoại của tôi |
+| GET | `/api/chat/threads/{threadId}` | `{thread, messages, pending}`; `pending` ≠ null → hiện lại nút xác nhận |
+| DELETE | `/api/chat/threads/{threadId}` | 204 |
+| POST | `/api/voice/stt` | multipart `file` (≤ 10 MB) → `{"text"}`. Chỉ dùng khi thiết bị không tự nhận dạng được; không lưu âm thanh |
+| POST | `/api/voice/tts` | `{"text"}` (≤ 4000 ký tự) → `audio/mpeg` |
+| GET | `/api/agent/tool-calls?traceId&threadId&agent&tool&status&flow&from&to&page&size` | Nhật ký tool call. `ADMIN` xem tất cả (+ `userId`); người dùng thường chỉ thấy của mình + luồng sự cố |
+
+Lỗi từ agent giữ nguyên mã: 404 `thread_not_found`, 409 `confirmation_pending` / `thread_busy` / `no_pending_confirmation`, 429 `rate_limited`, 503 `llm_disabled`.
+
+**Sự kiện SSE:** `meta` → (`status` | `token` | `discard`)* → `confirmation` **hoặc** `done` **hoặc** `error`; sau `/confirm`: `meta` → `result` → … → `done`. Chi tiết `data` của từng sự kiện: [../ai-agent/README.md](../ai-agent/README.md#api-nội-bộ-chỉ-java-be-gọi-header-x-internal-key). Đọc stream bằng `fetch` + `ReadableStream` (EventSource không gửi được POST / header `Authorization`).
+
+```bash
+curl -N -X POST localhost:8080/api/chat -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+     -d '{"message":"Kho đang thế nào?"}'
+```
 
 ### Realtime — WebSocket
 

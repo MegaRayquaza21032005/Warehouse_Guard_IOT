@@ -15,7 +15,8 @@ public record AppProperties(
         String internalApiKey,
         List<String> corsAllowedOrigins,
         WorkHours workHours,
-        Mqtt mqtt) {
+        Mqtt mqtt,
+        Agent agent) {
 
     public ZoneId zone() {
         return ZoneId.of(timezone);
@@ -33,6 +34,10 @@ public record AppProperties(
         public LocalTime endTime() {
             return LocalTime.parse(end);
         }
+    }
+
+    /** AI Agent nội bộ (FastAPI, không public). url vd. http://localhost:8000. */
+    public record Agent(String url, Duration timeout) {
     }
 
     public record Mqtt(boolean enabled, String host, int port, String username, String password, String clientId) {

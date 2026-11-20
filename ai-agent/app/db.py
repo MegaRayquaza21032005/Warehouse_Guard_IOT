@@ -35,3 +35,20 @@ async def migrate(pool: AsyncConnectionPool) -> list[str]:
             applied_now.append(f.name)
             log.info("Đã chạy migration %s", f.name)
     return applied_now
+
+
+async def open_checkpointer(conninfo: str):
+    """Short-term memory: AsyncPostgresSaver (bảng checkpoints* trong schema agent). Trả (pool, saver).
+
+    LangGraph cần autocommit + dict_row + tắt prepared statement -> pool riêng, không dùng chung pool trên.
+    """
+    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+    from psycopg.rows import dict_row
+
+    pool = AsyncConnectionPool(conninfo, min_size=1, max_size=5, open=False,
+                               kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row,
+                                       "options": "-c search_path=agent,public"})
+    await pool.open(wait=True, timeout=10)
+    saver = AsyncPostgresSaver(pool)
+    await saver.setup()
+    return pool, saver

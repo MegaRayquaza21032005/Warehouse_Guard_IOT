@@ -1,7 +1,11 @@
-# ai-agent — FastAPI + tầng luật (+ LangGraph từ giai đoạn 4)
+# ai-agent — FastAPI: tầng luật + multi-agent Supervisor (LangGraph)
 
-Thiết kế: [../CLAUDE.md](../CLAUDE.md) mục 5 (logic cảnh báo), 7 (memory), 8 (multi-agent).
-Hiện tại (**giai đoạn 3**): tầng luật **không dùng LLM** — nhận MQTT, phát hiện sự cố, gửi cảnh báo, bật đèn khi có đột nhập, leo thang cảnh báo chưa ai xem.
+Thiết kế: [../CLAUDE.md](../CLAUDE.md) mục 5 (logic cảnh báo), 6 (chatbot), 7 (memory), 8 (multi-agent).
+
+- **Tầng luật** (giai đoạn 3, **không LLM**): nhận MQTT, phát hiện sự cố, gửi cảnh báo, bật đèn khi đột nhập, leo thang.
+- **Multi-agent** (giai đoạn 4): Supervisor + 4 worker (Monitor, Analyst, Control, Notification), dùng cho **chatbot**
+  (stream SSE qua Java BE, lệnh ghi phải bấm [Đồng ý]) và **luồng sự cố** (LLM viết nội dung cảnh báo). STT/TTS dự phòng.
+- OpenAI lỗi / chậm / thiếu key → tầng luật vẫn chạy đầy đủ, cảnh báo gửi bản cơ bản.
 
 ## Chạy
 
@@ -11,7 +15,7 @@ cd ai-agent
 conda run --no-capture-output -n iot-agent python -m app  # nghe 127.0.0.1:8000 (không public)
 ```
 
-Cấu hình đọc từ `../.env`: `POSTGRES_AGENT_*`, `MQTT_AGENT_*`, `INTERNAL_API_KEY`, `BACKEND_PORT`, `WORK_*`, các ngưỡng tầng luật (`OFFLINE_TIMEOUT_S`, `ALERT_COOLDOWN_MIN`, `GAS_CONFIRM_S`, `ENV_PROLONGED_MIN`, `LIGHT_ON_AFTER_HOURS_S`, `INTRUSION_CLEAR_MIN`, `CMD_ACK_TIMEOUT_S`, `ESCALATION_MIN`, `LLM_ALERT_TIMEOUT_S`), `LOG_LEVEL`, `LOG_FORMAT`, `LANGFUSE_*`.
+Cấu hình đọc từ `../.env`: `OPENAI_*` (model, STT, TTS, `OPENAI_REASONING_EFFORT`), `INCIDENT_LLM_ENABLED`, `AGENT_MAX_STEPS`, `WORKER_MAX_STEPS`, `WORKER_TIMEOUT_S`, `CHAT_TIMEOUT_S`, `CHAT_HISTORY_MAX_MESSAGES`, `CHAT_MAX_PER_HOUR`, `CONFIRM_TTL_S`, `POSTGRES_AGENT_*`, `MQTT_AGENT_*`, `INTERNAL_API_KEY`, `BACKEND_PORT`, `WORK_*`, các ngưỡng tầng luật (`OFFLINE_TIMEOUT_S`, `ALERT_COOLDOWN_MIN`, `GAS_CONFIRM_S`, `ENV_PROLONGED_MIN`, `LIGHT_ON_AFTER_HOURS_S`, `INTRUSION_CLEAR_MIN`, `CMD_ACK_TIMEOUT_S`, `ESCALATION_MIN`, `LLM_ALERT_TIMEOUT_S`), `LOG_LEVEL`, `LOG_FORMAT`, `LANGFUSE_*` (`LANGFUSE_HOST` hoặc `LANGFUSE_BASE_URL`).
 Biến môi trường đặt khi chạy sẽ ghi đè `.env`, vd. test đột nhập ban ngày: `WORK_DAYS=7 python -m app`.
 
 DB / broker / Java BE chưa chạy → agent vẫn khởi động, tự kết nối lại; thiếu DB thì chỉ mất phần lưu sự cố.
@@ -21,6 +25,8 @@ DB / broker / Java BE chưa chạy → agent vẫn khởi động, tự kết n�
 ```bash
 conda run --no-capture-output -n iot-agent python -m pytest -q   # test DB (integration) tự bỏ qua nếu docker chưa chạy
 ```
+
+Test **không gọi OpenAI**: đồ thị multi-agent chạy với LLM giả có kịch bản (`tests/test_agent_graph.py`, `tests/test_agent_service.py`): xác nhận / hủy, Safety Guard chặn, quyền tối thiểu, giới hạn bước, luồng sự cố, nhật ký theo `trace_id`.
 
 Đầu cuối không cần ESP32: chạy Java BE + agent, rồi `python tools/simulate_esp32.py --plan normal:12,gas:20,fire:24 --interval 2 --once` (thư mục gốc).
 
@@ -37,12 +43,19 @@ conda run --no-capture-output -n iot-agent python -m pytest -q   # test DB (inte
 | `[CMD]` | Lệnh thiết bị tầng luật gửi |
 | `[INCIDENT]` | Mở / cập nhật / đóng sự cố |
 | `[ESCALATE]` | Leo thang cảnh báo critical chưa ai xem |
-| `[TOOL]` `[LLM]` | Tool call / token LLM (giai đoạn 4) |
+| `[CHAT]` | Tin nhắn đến (`user`, `thread`, `trace`), chờ xác nhận, Đồng ý / Hủy, trả lời xong (thời gian) |
+| `[AGENT]` | Supervisor xử lý sự cố, tóm tắt hội thoại dài |
+| `[TOOL]` | **Mọi** tool call: `agent.tool` + trạng thái (`requested`, `pending_confirmation`, `approved`, `rejected`, `success`, `error`, `blocked_by_policy`) + thời gian; lệnh MQTT đã gửi |
+| `[LLM]` | Token mỗi lần gọi LLM (`agent`, `in`, `out`) |
+| `[VOICE]` | STT / TTS phía server |
 | `[LANGFUSE]` `[DB]` `[BACKEND]` | Trạng thái kết nối |
 
 `LOG_FORMAT=json` → mỗi dòng một JSON.
 
-**Langfuse** (`LANGFUSE_ENABLED=true` + `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_HOST`): mỗi cảnh báo, lệnh, sự kiện sự cố được gửi thành event; các event cùng sự cố nằm chung một trace (trace id sinh từ incident id). Bí mật được che trước khi gửi. Langfuse lỗi / tắt không ảnh hưởng tầng luật.
+**Langfuse** (`LANGFUSE_ENABLED=true` + `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_HOST`/`LANGFUSE_BASE_URL`):
+- Tầng luật: mỗi cảnh báo, lệnh, sự kiện sự cố là một event; cùng sự cố nằm chung một trace (seed = incident id).
+- Multi-agent: callback LangGraph → cây trace `supervisor → dispatch → worker → tool`, mỗi lần gọi `ChatOpenAI` có token + chi phí. Trace id sinh từ `trace_id` của hệ thống (seed); `session` = `thread_id` (hội thoại hoặc sự cố); `user` = `user_id`; metadata có `trace_id`, `flow`.
+- Bí mật được che (`mask`) trước khi gửi. Langfuse lỗi / tắt không ảnh hưởng luồng chính.
 
 ## Luật (CLAUDE.md mục 5.4)
 
@@ -59,18 +72,68 @@ conda run --no-capture-output -n iot-agent python -m pytest -q   # test DB (inte
 | `temp_high_prolonged` / `hum_high_prolonged` | info | Vượt ngưỡng liên tục `ENV_PROLONGED_MIN` phút |
 | `ventilation_ineffective` | info | Quạt báo `reason=hum_ineffective` |
 | `recovered` | info | Đóng sự cố (kèm thời gian kéo dài) |
+| `manual_notice` | do người dùng chọn | Thông báo phát từ chatbot (sau khi bấm [Đồng ý]), `source=agent` |
 | `escalation` | critical | Cảnh báo critical chưa ai bấm "Đã xem" quá `ESCALATION_MIN` phút (hỏi Java BE 30s/lần) |
 
 - `info` / `warning` cùng loại: cooldown `ALERT_COOLDOWN_MIN`. `critical` **không bao giờ** bị chặn.
-- Gửi theo mức: `critical` gửi ngay; `warning` / `info` sẽ qua LLM (tối đa `LLM_ALERT_TIMEOUT_S`) từ giai đoạn 4 — hiện chưa có LLM nên gửi bản của tầng luật ngay.
+- Gửi theo mức: `critical` gửi ngay (rồi LLM gửi thêm `<type>_analysis`); `warning` / `info` qua LLM trước (tối đa `LLM_ALERT_TIMEOUT_S`), quá hạn / lỗi → bản của tầng luật. `escalation` không qua LLM.
+
+## Multi-agent (CLAUDE.md mục 8)
+
+```
+START ─► supervisor ──(ask_*)──► dispatch ──(có đề xuất)──► confirm (interrupt) ─┐
+            ▲  └──(trả lời)──► END   │                                            │
+            └────────────────────────┴────────────────────────────────────────────┘
+```
+
+| Agent | Tools | Loại |
+|-------|-------|------|
+| Supervisor | `ask_monitor`, `ask_analyst`, `ask_control`, `ask_notification` (giao việc) | — |
+| Monitor | `get_current_state`, `get_sensor_history`, `get_device_status`, `get_device_logs`, `get_alert_history`, `get_statistics` | đọc (Java BE REST) |
+| Analyst | `search_incidents` (sự cố gần nhất từ `agent.incidents`), `search_warehouse_facts`, `search_feedback` (trả rỗng đến giai đoạn 5) | đọc |
+| Control | `control_fan`, `control_mist`, `control_light`, `update_thresholds` | **ghi** |
+| Notification | `publish_alert` | **ghi** |
+
+- **Quyền tối thiểu:** mỗi worker chỉ được bind đúng bộ tool của mình; gọi tool ngoài quyền → ghi log `error`, không chạy.
+- **Mọi tool call đều được ghi** (`app/agents/tools.py`: tool chỉ tạo được qua `make_read_tool` / `make_write_tool`), kể cả lệnh giao việc của Supervisor.
+- **Safety Guard** (`app/agents/safety_guard.py`, code thuần): không bật quạt khi `fire`; không tắt quạt / đèn khi `gas_danger` (đèn: cả `fire`); không bật phun sương khi có khí/khói, độ ẩm ≥ `humHigh` hoặc không có số liệu ẩm gần đây (> 120s); ESP32 offline → chặn; ngưỡng kiểm tra giống firmware. Kiểm tra **2 lần**: khi tạo đề xuất và ngay trước khi gửi MQTT.
+- **Luồng chat:** tool ghi chỉ tạo **đề xuất** (log `pending_confirmation`) → `interrupt` → người dùng bấm → `approved` → gửi lệnh (`source=user`, `user_id`) → chờ ESP32 `ack` tối đa 8s → `success`; Hủy → `rejected`; quá `CONFIRM_TTL_S` → hết hạn. Đang chờ xác nhận thì không nhận tin nhắn mới (409).
+- **Luồng sự cố** (`AlertDispatcher.enricher`): Supervisor (`mode=incident`, thread = incident id) → Notification soạn nội dung. Control chỉ được tự động bật đèn / bật quạt khi có khí (`source=agent`); đổi ngưỡng luôn bị chặn. `warning`/`info`: quá `LLM_ALERT_TIMEOUT_S` → bản của tầng luật. `critical`: đã gửi ngay, LLM gửi thêm `<type>_analysis`. LLM không hạ mức, không tắt push của `warning`/`critical`.
+- **Short-term memory:** `AsyncPostgresSaver` (bảng `checkpoints*` trong schema `agent`), `thread_id` = hội thoại / sự cố. Quá `CHAT_HISTORY_MAX_MESSAGES` tin → tóm tắt phần cũ (giữ ~một nửa gần nhất).
+- **Giới hạn:** `AGENT_MAX_STEPS` lượt Supervisor (vượt → trả lời bằng dữ liệu đang có, nêu rõ chưa xong), `WORKER_MAX_STEPS`, `WORKER_TIMEOUT_S`, `CHAT_TIMEOUT_S`, `CHAT_MAX_PER_HOUR`.
+- **Prompt:** bản gốc `app/agents/prompts.py`; bản đọc `prompts/*.md` sinh bằng `python -m app.agents.prompts` (test báo lỗi nếu lệch).
+- **Token:** mỗi lần gọi LLM / STT / TTS ghi `agent.llm_usage` (chưa tính `cost_usd` — giá theo model để giai đoạn 8).
 
 ## API nội bộ (chỉ Java BE gọi, header `X-Internal-Key`)
 
 | Method | Path | |
 |--------|------|--|
-| GET | `/health` | Không cần khóa. `{"status","mqtt","db","langfuse"}` |
-| GET | `/rules/state` | Trạng thái tầng luật: an toàn, sự cố đang mở, ngưỡng, số bản tin, cảnh báo đã gửi |
+| GET | `/health` | Không cần khóa. `{"status","mqtt","db","langfuse","agent"}` |
+| GET | `/rules/state` | Trạng thái tầng luật: an toàn, sự cố đang mở, ngưỡng, thiết bị, số bản tin, cảnh báo đã gửi |
 | GET | `/incidents?open_only=&limit=` | Sự cố đã lưu (schema `agent.incidents`) |
+| POST | `/chat` | `{"user_id","username"?,"thread_id"?,"message","input_mode":"text\|voice"}` → **SSE**. Không có `thread_id` = hội thoại mới. 404 `thread_not_found`, 409 `thread_busy` / `confirmation_pending`, 429 `rate_limited`, 503 `llm_disabled` / `db_unavailable` |
+| POST | `/chat/{thread_id}/confirm` | `{"user_id","approved"}` → **SSE**. 409 `no_pending_confirmation` |
+| GET | `/chat/threads?user_id=` | Hội thoại của người dùng (mới nhất trước) |
+| GET | `/chat/threads/{id}?user_id=` | `{thread, messages, pending}` — `pending` = đề xuất đang chờ (để hiện lại nút) |
+| DELETE | `/chat/threads/{id}?user_id=` | Xóa hội thoại + checkpoint |
+| POST | `/voice/stt` | multipart `file` (≤ 10 MB), `user_id`, `language=vi` → `{"text"}`. Không lưu âm thanh |
+| POST | `/voice/tts` | `{"user_id","text"}` → `audio/mpeg` (bỏ khối biểu đồ, markdown) |
+| GET | `/logs/tool-calls` | Lọc `trace_id`, `thread_id`, `user_id`, `viewer_id` (= chỉ của user này + luồng sự cố), `agent`, `tool`, `status`, `flow`, `from`, `to`, `limit`, `offset` |
+
+**Sự kiện SSE** (`event:` / `data:` JSON):
+
+| event | data |
+|-------|------|
+| `meta` | `{thread_id, trace_id}` — luôn đầu tiên |
+| `status` | `{agent, text}` — Supervisor đang giao việc cho worker nào |
+| `token` | `{text}` — từng đoạn câu trả lời của Supervisor |
+| `discard` | `{}` — bỏ phần chữ tạm đã nhận (lượt đó Supervisor chuyển sang gọi tool) |
+| `confirmation` | `{type, proposals:[{id, tool, kind, args, description, note}], expires_at, thread_id, trace_id}` — hiện [Đồng ý] / [Hủy]; stream kết thúc |
+| `result` | `{approved, expired, outcomes:[{id, description, status, text, ack}]}` — sau khi bấm |
+| `done` | `{message, blocks, speech, thread_id, trace_id, outcomes}` — **`blocks` là bản chuẩn để hiển thị** (`text` / `chart`); `speech` = chữ để đọc TTS |
+| `error` | `{code, message, trace_id}` — `timeout` / `agent_error` |
+
+Khối biểu đồ trong `message` có dạng ` ```chart {json} ``` `; server đã tách sẵn vào `blocks` (khối sai định dạng bị bỏ).
 
 ## Cấu trúc
 
@@ -86,7 +149,17 @@ app/
 ├── rules/                 # TẦNG LUẬT — engine.py là logic thuần (test bằng đồng hồ giả)
 │   ├── engine.py, actions.py, schedule.py
 │   └── alert_policy.py    # gửi theo mức, chờ LLM có timeout
-├── observability/         # tool_logger.py, usage.py (giai đoạn 4), langfuse.py, redact.py
-└── api/                   # deps.py (khóa nội bộ), health.py
-migrations/001_init.sql    # agent.tool_call_logs, llm_usage, incidents
+├── agents/                # MULTI-AGENT (giai đoạn 4)
+│   ├── graph.py           # đồ thị LangGraph: supervisor / dispatch / confirm, WorkerRunner
+│   ├── tools.py           # tools 4 worker + lớp log bắt buộc + ActionExecutor (gửi MQTT)
+│   ├── safety_guard.py    # chính sách an toàn bằng code (thuần, test riêng)
+│   ├── prompts.py         # prompt — bản gốc (sinh prompts/*.md)
+│   ├── service.py         # chat SSE, hội thoại, xác nhận, rate limit, enrich cho luồng sự cố
+│   ├── charts.py          # tách khối biểu đồ
+│   ├── llm.py             # ChatOpenAI + ghi token
+│   └── voice.py           # STT / TTS
+├── observability/         # tool_logger.py, usage.py, langfuse.py, redact.py
+└── api/                   # deps.py (khóa nội bộ), health.py, chat.py (chat, voice, logs)
+migrations/                # 001: tool_call_logs, llm_usage, incidents · 002: chat_threads, chat_messages
+prompts/*.md               # SINH từ app/agents/prompts.py — không sửa tay
 ```

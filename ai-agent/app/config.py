@@ -4,7 +4,7 @@ from datetime import time
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -53,9 +53,30 @@ class Settings(BaseSettings):
     escalation_min: int = 5
     llm_alert_timeout_s: int = 15
 
+    # --- OpenAI (giai đoạn 4) ---
+    openai_api_key: str = ""
+    openai_model: str = "gpt-5.4-mini"            # Supervisor
+    openai_model_worker: str = ""                 # trống = dùng openai_model
+    openai_reasoning_effort: str = "none"         # none = nhanh, dùng được tool qua chat completions
+    openai_stt_model: str = "gpt-4o-mini-transcribe"
+    openai_tts_model: str = "gpt-4o-mini-tts"
+    openai_tts_voice: str = "coral"
+    openai_timeout_s: int = 30
+
+    # --- Multi-agent / chatbot (CLAUDE.md mục 6, 8) ---
+    incident_llm_enabled: bool = True             # luồng sự cố dùng LLM (tắt -> chỉ tầng luật)
+    agent_max_steps: int = 6                      # số lượt Supervisor tối đa / yêu cầu
+    worker_max_steps: int = 5                     # số vòng tool tối đa / worker
+    worker_timeout_s: int = 45
+    chat_timeout_s: int = 120
+    chat_history_max_messages: int = 30           # vượt -> tóm tắt phần cũ
+    chat_max_per_hour: int = 60                   # mỗi người dùng
+    confirm_ttl_s: int = 300                      # đề xuất quá hạn -> coi như hủy
+
     # --- Langfuse ---
     langfuse_enabled: bool = False
-    langfuse_host: str = "https://cloud.langfuse.com"
+    langfuse_host: str = Field("https://cloud.langfuse.com",
+                               validation_alias=AliasChoices("LANGFUSE_HOST", "LANGFUSE_BASE_URL", "langfuse_host"))
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
 
@@ -67,6 +88,21 @@ class Settings(BaseSettings):
     @property
     def work_day_set(self) -> set[int]:
         return {int(d) for d in self.work_days.split(",") if d.strip()}
+
+    @field_validator("openai_model", "openai_stt_model", "openai_tts_model", "openai_tts_voice",
+                     "openai_reasoning_effort", mode="before")
+    @classmethod
+    def _empty_to_default(cls, v, info):
+        # .env để trống (OPENAI_MODEL=) -> dùng mặc định trong code
+        return cls.model_fields[info.field_name].default if v in ("", None) else v
+
+    @property
+    def worker_model(self) -> str:
+        return self.openai_model_worker or self.openai_model
+
+    @property
+    def llm_enabled(self) -> bool:
+        return bool(self.openai_api_key)
 
     @property
     def backend_base_url(self) -> str:

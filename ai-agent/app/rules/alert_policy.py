@@ -79,6 +79,10 @@ class AlertDispatcher:
                            details={**alert.details, **(new.get("details") or {})})
             self._send(payload, " (phân tích bổ sung)")
 
+    def publish(self, payload: dict[str, Any], note: str = "") -> dict[str, Any]:
+        """Phát một cảnh báo đã soạn sẵn (vd. thông báo từ chatbot sau khi người dùng xác nhận)."""
+        return self._send(payload, note)
+
     def _send(self, payload: dict[str, Any], note: str) -> dict[str, Any]:
         ok = self.mqtt.publish(ALERT_TOPIC, payload)
         fn = {"critical": log.critical, "warning": log.warning}.get(payload["level"], log.info)

@@ -31,9 +31,13 @@ import tools.jackson.databind.ObjectMapper;
         "app.timezone=Asia/Ho_Chi_Minh",
         "app.work-hours.start=08:00",
         "app.work-hours.end=17:30",
-        "app.work-hours.days=1,2,3,4,5,6" })
+        "app.work-hours.days=1,2,3,4,5,6",
+        "app.agent.url=http://127.0.0.1:" + IntegrationTestBase.AGENT_PORT })
 @Import(TestcontainersConfiguration.class)
 public abstract class IntegrationTestBase {
+
+    /** Cổng của AI Agent giả (ChatIntegrationTest). */
+    protected static final int AGENT_PORT = 18765;
 
     protected static final TypeReference<Map<String, Object>> MAP = new TypeReference<>() {
     };
