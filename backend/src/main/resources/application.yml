@@ -1,0 +1,53 @@
+# Cấu hình Java BE. Giá trị lấy từ file .env ở thư mục gốc dự án (chạy từ thư mục backend/).
+spring:
+  application:
+    name: backend
+  config:
+    import:
+      - optional:file:../.env[.properties]
+      - optional:file:./.env[.properties]
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:warehouse}?currentSchema=app
+    username: ${POSTGRES_BACKEND_USER:backend}
+    password: ${POSTGRES_BACKEND_PASSWORD:backend}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: app
+        jdbc:
+          time_zone: UTC
+  flyway:
+    schemas: app
+    default-schema: app
+
+server:
+  port: ${BACKEND_PORT:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+app:
+  timezone: Asia/Ho_Chi_Minh
+  jwt:
+    secret: ${JWT_SECRET:}
+    access-ttl: ${JWT_ACCESS_TTL_MIN:60}m
+    refresh-ttl: ${JWT_REFRESH_TTL_DAYS:30}d
+  internal-api-key: ${INTERNAL_API_KEY:}
+  cors-allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+  work-hours:
+    start: ${WORK_HOURS_START:08:00}
+    end: ${WORK_HOURS_END:17:30}
+    days: ${WORK_DAYS:1,2,3,4,5,6}
+  mqtt:
+    enabled: true
+    host: ${MQTT_HOST:localhost}
+    port: ${MQTT_PORT:1883}
+    username: ${MQTT_BACKEND_USER:backend}
+    password: ${MQTT_BACKEND_PASSWORD:backend}
+    client-id: backend
