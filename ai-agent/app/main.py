@@ -16,10 +16,14 @@ from app.agents.tools import Services
 from app.agents.voice import VoiceService
 from app.api.chat import router as chat_router
 from app.api.health import router as health_router
+from app.api.memory import router as memory_router
 from app.backend_client import BackendClient
 from app.config import get_settings
 from app.db import migrate, open_checkpointer, open_pool
 from app.logging_setup import get_logger, setup_logging
+from app.maintenance import loop as maintenance_loop
+from app.memory.extractor import MemoryExtractor
+from app.memory.store import MemoryService, TrackedEmbeddings, index_config
 from app.mqtt.client import MqttBridge
 from app.observability.langfuse import Tracer
 from app.observability.tool_logger import ToolCallLogger
@@ -63,7 +67,7 @@ async def lifespan(app: FastAPI):
     usage = UsageRecorder(pool)
 
     # ---- Multi-agent (giai đoạn 4). Lỗi ở đây KHÔNG được làm dừng tầng luật.
-    agent, cp_pool = None, None
+    agent, cp_pool, checkpointer, memory, extractor = None, None, None, None, None
     if not s.llm_enabled:
         log.warning("Chưa có OPENAI_API_KEY — tắt chatbot / multi-agent, chỉ chạy tầng luật")
     else:
@@ -74,13 +78,34 @@ async def lifespan(app: FastAPI):
                 from langgraph.checkpoint.memory import InMemorySaver
                 checkpointer = InMemorySaver()
                 log.warning("Không có DB — short-term memory chỉ lưu trong RAM, tool ghi sẽ không chạy")
+            # ---- Long-term memory (giai đoạn 5): PostgresStore + pgvector (halfvec), dùng chung pool với checkpointer
+            if cp_pool is not None and s.memory_enabled:
+                try:
+                    from langgraph.store.postgres.aio import AsyncPostgresStore
+                    store = AsyncPostgresStore(cp_pool, index=index_config(TrackedEmbeddings(s, usage),
+                                                                           s.embedding_dims))
+                    await store.setup()
+                    memory = MemoryService(store, s)
+                    log.info("Long-term memory sẵn sàng (%s, %d chiều, halfvec)", s.openai_embedding_model,
+                             s.embedding_dims)
+                except Exception:  # noqa: BLE001 — memory lỗi: chatbot vẫn chạy, chỉ không có ghi nhớ
+                    log.exception("Không khởi tạo được long-term memory — chạy tiếp không có memory")
+                    memory = None
+            tool_logger = ToolCallLogger(pool)
             services = Services(settings=s, backend=backend, mqtt=mqtt, engine=engine, runtime=runtime,
-                                dispatcher=dispatcher, logger=ToolCallLogger(pool), pool=pool)
+                                dispatcher=dispatcher, logger=tool_logger, pool=pool, memory=memory)
             sup_llm = make_chat_model(s, s.openai_model)
             wrk_llm = sup_llm if s.worker_model == s.openai_model else make_chat_model(s, s.worker_model)
-            graph = build_graph(services, LLMCaller(usage), sup_llm, s.openai_model, wrk_llm, s.worker_model,
-                                checkpointer)
+            caller = LLMCaller(usage)
+            graph = build_graph(services, caller, sup_llm, s.openai_model, wrk_llm, s.worker_model, checkpointer)
             agent = AgentService(s, graph, tracer, pool, engine, checkpointer)
+            if memory is not None:
+                extractor = MemoryExtractor(memory, tool_logger, caller,
+                                            wrk_llm.bind(response_format={"type": "json_object"}), wrk_llm,
+                                            s.worker_model, pool, s)
+                agent.extractor = extractor
+                if s.memory_extract_enabled:
+                    runtime.on_incident_closed = lambda iid: extractor.spawn(extractor.on_incident_closed(iid))
             if s.incident_llm_enabled:
                 dispatcher.enricher = agent.enrich
             log.info("Multi-agent sẵn sàng: Supervisor=%s, worker=%s, luồng sự cố %s", s.openai_model,
@@ -90,6 +115,8 @@ async def lifespan(app: FastAPI):
             agent = None
 
     app.state.settings, app.state.agent, app.state.voice = s, agent, VoiceService(s, usage)
+    app.state.memory, app.state.extractor = memory, extractor
+    maintenance = asyncio.create_task(maintenance_loop(s, pool, cp_pool, checkpointer), name="maintenance")
     app.state.pool, app.state.mqtt, app.state.tracer, app.state.runtime = pool, mqtt, tracer, runtime
     mqtt.start()
     runtime.start()
@@ -98,6 +125,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         log.info("Đang dừng...")
+        maintenance.cancel()
         await runtime.stop()
         mqtt.stop()
         await backend.close()
@@ -109,6 +137,7 @@ async def lifespan(app: FastAPI):
         log.info("Đã dừng")
 
 
-app = FastAPI(title="Warehouse AI Agent", version="0.4.0", lifespan=lifespan)
+app = FastAPI(title="Warehouse AI Agent", version="0.5.0", lifespan=lifespan)
 app.include_router(health_router)
 app.include_router(chat_router)
+app.include_router(memory_router)

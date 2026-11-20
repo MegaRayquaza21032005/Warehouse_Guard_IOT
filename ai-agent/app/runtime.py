@@ -47,6 +47,8 @@ class RuleRuntime:
         self.started_at = time.time()
         self._tasks: list[asyncio.Task] = []
         self._ack_waiters: dict[str, asyncio.Future] = {}
+        # Giai đoạn 5: gọi khi sự cố ĐÓNG (sau khi đã lưu DB) -> bước trích xuất memory tóm tắt sự cố
+        self.on_incident_closed = None
 
     def start(self) -> None:
         self._tasks = [asyncio.create_task(self.consume(), name="rules-consume"),
@@ -148,6 +150,12 @@ class RuleRuntime:
                          e.incident_id))
         except Exception as ex:  # noqa: BLE001
             inc_log.error("Không lưu được sự cố %s: %s", e.incident_id, ex)
+            return
+        if e.action == "close" and self.on_incident_closed is not None:
+            try:
+                self.on_incident_closed(e.incident_id)
+            except Exception:  # noqa: BLE001
+                inc_log.exception("Không chạy được bước tóm tắt sự cố %s", e.incident_id)
 
     async def escalate_once(self) -> int:
         """Cảnh báo critical chưa ai bấm "Đã xem" quá ESCALATION_MIN phút -> gửi cảnh báo leo thang (1 lần / cảnh báo)."""

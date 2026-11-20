@@ -75,6 +75,12 @@ public class AgentClient {
         }
     }
 
+    public Object postJson(String path, Object body) {
+        HttpRequest req = request(path, Map.of()).header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body))).build();
+        return parse(send(req, HttpResponse.BodyHandlers.ofString()));
+    }
+
     public byte[] postForBytes(String path, Object body) {
         HttpRequest req = request(path, Map.of()).header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body))).build();

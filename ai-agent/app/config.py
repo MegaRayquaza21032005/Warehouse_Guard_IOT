@@ -73,6 +73,20 @@ class Settings(BaseSettings):
     chat_max_per_hour: int = 60                   # mỗi người dùng
     confirm_ttl_s: int = 300                      # đề xuất quá hạn -> coi như hủy
 
+    # --- Long-term memory (CLAUDE.md mục 7, giai đoạn 5) ---
+    openai_embedding_model: str = "text-embedding-3-large"
+    embedding_dims: int = 3072                    # đổi model -> đổi số chiều + embed lại toàn bộ
+    memory_enabled: bool = True
+    memory_extract_enabled: bool = True           # bước trích xuất memory chạy nền sau lượt chat / khi đóng sự cố
+    memory_context_limit: int = 5                 # số mục kiến thức kho / phản hồi nạp vào ngữ cảnh mỗi lượt
+    memory_min_score: float = 0.4                 # độ giống tối thiểu (cosine) khi tìm theo ngữ nghĩa (đo: liên quan ~0.55, lạc đề ~0.37)
+    memory_dedupe_score: float = 0.8              # giống hơn mức này -> trùng (đo: cùng ý ~0.84)
+
+    # --- Dọn dữ liệu cũ ---
+    checkpoint_ttl_days: int = 30                 # short-term memory (checkpoint) của hội thoại / sự cố
+    tool_log_read_days: int = 90                  # nhật ký tool đọc
+    tool_log_write_days: int = 365                # nhật ký tool ghi (điều khiển, cấu hình, memory)
+
     # --- Langfuse ---
     langfuse_enabled: bool = False
     langfuse_host: str = Field("https://cloud.langfuse.com",
@@ -90,7 +104,7 @@ class Settings(BaseSettings):
         return {int(d) for d in self.work_days.split(",") if d.strip()}
 
     @field_validator("openai_model", "openai_stt_model", "openai_tts_model", "openai_tts_voice",
-                     "openai_reasoning_effort", mode="before")
+                     "openai_reasoning_effort", "openai_embedding_model", mode="before")
     @classmethod
     def _empty_to_default(cls, v, info):
         # .env để trống (OPENAI_MODEL=) -> dùng mặc định trong code

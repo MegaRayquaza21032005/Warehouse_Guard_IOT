@@ -88,6 +88,11 @@ class ChatIntegrationTest extends IntegrationTestBase {
             } else {
                 send(ex, 404, "application/json", "{\"error\":\"thread_not_found\",\"message\":\"Không tìm thấy\"}");
             }
+        } else if (ex.getRequestMethod().equals("DELETE")) {
+            ex.sendResponseHeaders(204, -1);
+            ex.close();
+        } else if (path.equals("/memory/feedback")) {
+            send(ex, 200, "application/json", "{\"key\":\"alert-1-u1\"}");
         } else {
             send(ex, 200, "application/json", "[]");
         }
@@ -186,6 +191,45 @@ class ChatIntegrationTest extends IntegrationTestBase {
                 .header("Authorization", auth)).andExpect(status().isOk());
         String q = received.get("/logs/tool-calls").get("query");
         assertThat(q).contains("viewer_id=1").contains("trace_id=c-1").doesNotContain("user_id=5");
+    }
+
+    @Test
+    void memoryEndpointsUseUserFromJwt() throws Exception {
+        String auth = "Bearer " + registerAndGetToken("thanh");
+        mvc.perform(get("/api/memories").header("Authorization", auth)).andExpect(status().isOk());
+        assertThat(received.get("/memory").get("query")).contains("user_id=1");
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/api/memories/abc123")
+                .header("Authorization", auth)).andExpect(status().isNoContent());
+        assertThat(received.get("/memory/abc123").get("query")).isEqualTo("user_id=1");
+        mvc.perform(get("/api/memories/warehouse").param("kind", "facts").header("Authorization", auth))
+                .andExpect(status().isOk());
+        assertThat(received.get("/memory/warehouse").get("query")).contains("kind=facts");
+        mvc.perform(get("/api/memories/warehouse").param("kind", "secrets").header("Authorization", auth))
+                .andExpect(status().isBadRequest());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                .delete("/api/memories/warehouse/k1").header("Authorization", auth))
+                .andExpect(status().isNoContent());
+        assertThat(received.get("/memory/warehouse/k1").get("query")).contains("user_id=1").contains("is_admin=false");
+    }
+
+    @Test
+    void alertFeedbackIsForwardedToAgentMemory() throws Exception {
+        String auth = "Bearer " + registerAndGetToken("thanh");
+        ingest.handle("warehouse/alert", json(Map.of("uid", "u1", "type", "gas", "level", "warning",
+                "message", "Phát hiện khí", "source", "rule")).getBytes(StandardCharsets.UTF_8), false);
+        long id = jdbc.sql("SELECT id FROM app.alerts").query(Long.class).single();
+        mvc.perform(post("/api/alerts/" + id + "/feedback").header("Authorization", auth)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(Map.of("feedback", "false_alarm", "note", "đang hàn"))))
+                .andExpect(status().isOk());
+        for (int i = 0; i < 50 && !received.containsKey("/memory/feedback"); i++) {
+            Thread.sleep(50);
+        }
+        Map<String, Object> body = parse(new String(received.get("/memory/feedback").get("body")
+                .getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8));
+        assertThat(body).containsEntry("user_id", 1).containsEntry("feedback", "false_alarm")
+                .containsEntry("note", "đang hàn");
+        assertThat(((Map<?, ?>) body.get("alert")).get("type")).isEqualTo("gas");
     }
 
     @Test

@@ -5,6 +5,8 @@ Thiết kế: [../CLAUDE.md](../CLAUDE.md) mục 5 (logic cảnh báo), 6 (chatb
 - **Tầng luật** (giai đoạn 3, **không LLM**): nhận MQTT, phát hiện sự cố, gửi cảnh báo, bật đèn khi đột nhập, leo thang.
 - **Multi-agent** (giai đoạn 4): Supervisor + 4 worker (Monitor, Analyst, Control, Notification), dùng cho **chatbot**
   (stream SSE qua Java BE, lệnh ghi phải bấm [Đồng ý]) và **luồng sự cố** (LLM viết nội dung cảnh báo). STT/TTS dự phòng.
+- **Long-term memory** (giai đoạn 5): PostgresStore + pgvector (`halfvec` 3072 chiều) — hồ sơ người dùng, kiến thức kho,
+  tóm tắt sự cố, phản hồi đúng / báo giả; tự nạp vào ngữ cảnh, bước trích xuất chạy nền. Memory **không bao giờ** chặn / hạ cảnh báo.
 - OpenAI lỗi / chậm / thiếu key → tầng luật vẫn chạy đầy đủ, cảnh báo gửi bản cơ bản.
 
 ## Chạy
@@ -15,7 +17,7 @@ cd ai-agent
 conda run --no-capture-output -n iot-agent python -m app  # nghe 127.0.0.1:8000 (không public)
 ```
 
-Cấu hình đọc từ `../.env`: `OPENAI_*` (model, STT, TTS, `OPENAI_REASONING_EFFORT`), `INCIDENT_LLM_ENABLED`, `AGENT_MAX_STEPS`, `WORKER_MAX_STEPS`, `WORKER_TIMEOUT_S`, `CHAT_TIMEOUT_S`, `CHAT_HISTORY_MAX_MESSAGES`, `CHAT_MAX_PER_HOUR`, `CONFIRM_TTL_S`, `POSTGRES_AGENT_*`, `MQTT_AGENT_*`, `INTERNAL_API_KEY`, `BACKEND_PORT`, `WORK_*`, các ngưỡng tầng luật (`OFFLINE_TIMEOUT_S`, `ALERT_COOLDOWN_MIN`, `GAS_CONFIRM_S`, `ENV_PROLONGED_MIN`, `LIGHT_ON_AFTER_HOURS_S`, `INTRUSION_CLEAR_MIN`, `CMD_ACK_TIMEOUT_S`, `ESCALATION_MIN`, `LLM_ALERT_TIMEOUT_S`), `LOG_LEVEL`, `LOG_FORMAT`, `LANGFUSE_*` (`LANGFUSE_HOST` hoặc `LANGFUSE_BASE_URL`).
+Cấu hình đọc từ `../.env`: `OPENAI_*` (model, STT, TTS, `OPENAI_REASONING_EFFORT`), `INCIDENT_LLM_ENABLED`, `AGENT_MAX_STEPS`, `WORKER_MAX_STEPS`, `WORKER_TIMEOUT_S`, `CHAT_TIMEOUT_S`, `CHAT_HISTORY_MAX_MESSAGES`, `CHAT_MAX_PER_HOUR`, `CONFIRM_TTL_S`, `OPENAI_EMBEDDING_MODEL`, `EMBEDDING_DIMS`, `MEMORY_*`, `CHECKPOINT_TTL_DAYS`, `TOOL_LOG_READ_DAYS`, `TOOL_LOG_WRITE_DAYS`, `POSTGRES_AGENT_*`, `MQTT_AGENT_*`, `INTERNAL_API_KEY`, `BACKEND_PORT`, `WORK_*`, các ngưỡng tầng luật (`OFFLINE_TIMEOUT_S`, `ALERT_COOLDOWN_MIN`, `GAS_CONFIRM_S`, `ENV_PROLONGED_MIN`, `LIGHT_ON_AFTER_HOURS_S`, `INTRUSION_CLEAR_MIN`, `CMD_ACK_TIMEOUT_S`, `ESCALATION_MIN`, `LLM_ALERT_TIMEOUT_S`), `LOG_LEVEL`, `LOG_FORMAT`, `LANGFUSE_*` (`LANGFUSE_HOST` hoặc `LANGFUSE_BASE_URL`).
 Biến môi trường đặt khi chạy sẽ ghi đè `.env`, vd. test đột nhập ban ngày: `WORK_DAYS=7 python -m app`.
 
 DB / broker / Java BE chưa chạy → agent vẫn khởi động, tự kết nối lại; thiếu DB thì chỉ mất phần lưu sự cố.
@@ -48,6 +50,8 @@ Test **không gọi OpenAI**: đồ thị multi-agent chạy với LLM giả có
 | `[TOOL]` | **Mọi** tool call: `agent.tool` + trạng thái (`requested`, `pending_confirmation`, `approved`, `rejected`, `success`, `error`, `blocked_by_policy`) + thời gian; lệnh MQTT đã gửi |
 | `[LLM]` | Token mỗi lần gọi LLM (`agent`, `in`, `out`) |
 | `[VOICE]` | STT / TTS phía server |
+| `[MEMORY]` | Lưu / xóa long-term memory (`namespace/key: nội dung`), lỗi bước trích xuất |
+| `[MAINTAIN]` | Dọn checkpoint / nhật ký cũ |
 | `[LANGFUSE]` `[DB]` `[BACKEND]` | Trạng thái kết nối |
 
 `LOG_FORMAT=json` → mỗi dòng một JSON.
@@ -88,9 +92,9 @@ START ─► supervisor ──(ask_*)──► dispatch ──(có đề xuất)
 
 | Agent | Tools | Loại |
 |-------|-------|------|
-| Supervisor | `ask_monitor`, `ask_analyst`, `ask_control`, `ask_notification` (giao việc) | — |
+| Supervisor | `ask_monitor`, `ask_analyst`, `ask_control`, `ask_notification` (giao việc) + `save_memory` | `save_memory`: **ghi** |
 | Monitor | `get_current_state`, `get_sensor_history`, `get_device_status`, `get_device_logs`, `get_alert_history`, `get_statistics` | đọc (Java BE REST) |
-| Analyst | `search_incidents` (sự cố gần nhất từ `agent.incidents`), `search_warehouse_facts`, `search_feedback` (trả rỗng đến giai đoạn 5) | đọc |
+| Analyst | `search_incidents`, `search_warehouse_facts`, `search_feedback` — tìm theo ngữ nghĩa trong long-term memory (`search_incidents` không có tóm tắt liên quan → sự cố gần nhất từ `agent.incidents`) | đọc |
 | Control | `control_fan`, `control_mist`, `control_light`, `update_thresholds` | **ghi** |
 | Notification | `publish_alert` | **ghi** |
 
@@ -102,13 +106,28 @@ START ─► supervisor ──(ask_*)──► dispatch ──(có đề xuất)
 - **Short-term memory:** `AsyncPostgresSaver` (bảng `checkpoints*` trong schema `agent`), `thread_id` = hội thoại / sự cố. Quá `CHAT_HISTORY_MAX_MESSAGES` tin → tóm tắt phần cũ (giữ ~một nửa gần nhất).
 - **Giới hạn:** `AGENT_MAX_STEPS` lượt Supervisor (vượt → trả lời bằng dữ liệu đang có, nêu rõ chưa xong), `WORKER_MAX_STEPS`, `WORKER_TIMEOUT_S`, `CHAT_TIMEOUT_S`, `CHAT_MAX_PER_HOUR`.
 - **Prompt:** bản gốc `app/agents/prompts.py`; bản đọc `prompts/*.md` sinh bằng `python -m app.agents.prompts` (test báo lỗi nếu lệch).
-- **Token:** mỗi lần gọi LLM / STT / TTS ghi `agent.llm_usage` (chưa tính `cost_usd` — giá theo model để giai đoạn 8).
+- **Token:** mỗi lần gọi LLM / STT / TTS / embedding ghi `agent.llm_usage` (embedding: token ước lượng bằng tiktoken; chưa tính `cost_usd` — để giai đoạn 8).
+
+## Long-term memory (CLAUDE.md mục 7)
+
+| Namespace | Nội dung | Ai ghi | Ai đọc |
+|-----------|----------|--------|--------|
+| `users/<id>/profile` | Sở thích người dùng (xưng hô, mức chi tiết, quan tâm) | `save_memory` personal (lưu ngay), bước trích xuất | Supervisor — **chỉ của người đang chat** |
+| `warehouse/facts` | Kiến thức về kho, dùng chung | `save_memory` warehouse — **sau khi bấm Đồng ý** | Supervisor (tự nạp), Analyst |
+| `warehouse/incidents` | Tóm tắt sự cố đã đóng (key = incident id) | Bước trích xuất khi sự cố đóng (LLM lỗi → tóm tắt mẫu) | Analyst |
+| `warehouse/feedback` | Đúng / báo giả + lý do | Nút phản hồi trên app (qua Java BE), `save_memory` feedback | Supervisor luồng sự cố (tự nạp), Analyst |
+
+- **Tự nạp** ở lượt đầu mỗi yêu cầu (tối đa 5s, lỗi → bỏ qua): chat = hồ sơ + kiến thức kho liên quan tin nhắn; sự cố = kiến thức kho + phản hồi liên quan, câu tìm gồm nội dung cảnh báo + buổi + thứ (vd. "… chiều Thứ Sáu") để khớp kiến thức kiểu "chiều thứ 6 hay hàn". Đánh dấu là DỮ LIỆU trong prompt.
+- **Safety Guard cho memory** (`check_memory`): từ chối nội dung nới lỏng cảnh báo ("khói là bình thường, đừng báo", "tắt cảnh báo"...), chứa mật khẩu / khóa, trống, > 500 ký tự. Luồng sự cố: memory chỉ thêm ghi chú "Có thể do …"; mức cảnh báo và push của `warning`/`critical` bị khóa bằng code.
+- **Bước trích xuất** (`app/memory/extractor.py`, không phải agent): sau lượt chat (trừ lượt Supervisor đã gọi `save_memory`) rút sở thích cá nhân + phản hồi mà **người dùng** khẳng định (không lấy suy đoán của trợ lý); không tự lưu kiến thức kho. Chống trùng bằng độ giống ≥ `MEMORY_DEDUPE_SCORE`. Mọi lần ghi: `agent.tool_call_logs` (`agent=memory_extractor`).
+- **Ngưỡng** đo với `text-embedding-3-large`: cùng ý khác lời ≈ 0.84, liên quan ≈ 0.55–0.6, lạc đề ≈ 0.37 → `MEMORY_DEDUPE_SCORE=0.8`, `MEMORY_MIN_SCORE=0.4`.
+- **Dọn dữ liệu** (`app/maintenance.py`, 6 giờ/lần): checkpoint không hoạt động quá `CHECKPOINT_TTL_DAYS` (lịch sử hiển thị vẫn giữ), nhật ký tool đọc `TOOL_LOG_READ_DAYS`, tool ghi `TOOL_LOG_WRITE_DAYS`.
 
 ## API nội bộ (chỉ Java BE gọi, header `X-Internal-Key`)
 
 | Method | Path | |
 |--------|------|--|
-| GET | `/health` | Không cần khóa. `{"status","mqtt","db","langfuse","agent"}` |
+| GET | `/health` | Không cần khóa. `{"status","mqtt","db","langfuse","agent","memory"}` |
 | GET | `/rules/state` | Trạng thái tầng luật: an toàn, sự cố đang mở, ngưỡng, thiết bị, số bản tin, cảnh báo đã gửi |
 | GET | `/incidents?open_only=&limit=` | Sự cố đã lưu (schema `agent.incidents`) |
 | POST | `/chat` | `{"user_id","username"?,"thread_id"?,"message","input_mode":"text\|voice"}` → **SSE**. Không có `thread_id` = hội thoại mới. 404 `thread_not_found`, 409 `thread_busy` / `confirmation_pending`, 429 `rate_limited`, 503 `llm_disabled` / `db_unavailable` |
@@ -118,6 +137,11 @@ START ─► supervisor ──(ask_*)──► dispatch ──(có đề xuất)
 | DELETE | `/chat/threads/{id}?user_id=` | Xóa hội thoại + checkpoint |
 | POST | `/voice/stt` | multipart `file` (≤ 10 MB), `user_id`, `language=vi` → `{"text"}`. Không lưu âm thanh |
 | POST | `/voice/tts` | `{"user_id","text"}` → `audio/mpeg` (bỏ khối biểu đồ, markdown) |
+| GET | `/memory?user_id=` | Memory cá nhân của người dùng |
+| DELETE | `/memory/{key}?user_id=` | Xóa memory cá nhân (404 nếu không phải của người này) |
+| GET | `/memory/warehouse?kind=facts\|incidents\|feedback&limit&offset` | Memory dùng chung |
+| DELETE | `/memory/warehouse/{key}?user_id=&is_admin=` | Xóa kiến thức kho — người tạo hoặc ADMIN (403 `not_owner`) |
+| POST | `/memory/feedback` | `{"user_id","alert":{id,type,level,message,ts},"feedback":"true_alarm\|false_alarm","note"?}` — Java BE gọi khi người dùng bấm phản hồi |
 | GET | `/logs/tool-calls` | Lọc `trace_id`, `thread_id`, `user_id`, `viewer_id` (= chỉ của user này + luồng sự cố), `agent`, `tool`, `status`, `flow`, `from`, `to`, `limit`, `offset` |
 
 **Sự kiện SSE** (`event:` / `data:` JSON):
@@ -158,8 +182,12 @@ app/
 │   ├── charts.py          # tách khối biểu đồ
 │   ├── llm.py             # ChatOpenAI + ghi token
 │   └── voice.py           # STT / TTS
+├── memory/                # LONG-TERM MEMORY (giai đoạn 5)
+│   ├── store.py           # MemoryService, namespace, embedding có ghi token, định dạng ngữ cảnh
+│   └── extractor.py       # bước trích xuất chạy nền: sau chat, khi đóng sự cố, phản hồi từ app
+├── maintenance.py         # dọn checkpoint / nhật ký cũ
 ├── observability/         # tool_logger.py, usage.py, langfuse.py, redact.py
-└── api/                   # deps.py (khóa nội bộ), health.py, chat.py (chat, voice, logs)
+└── api/                   # deps.py (khóa nội bộ), health.py, chat.py (chat, voice, logs), memory.py
 migrations/                # 001: tool_call_logs, llm_usage, incidents · 002: chat_threads, chat_messages
 prompts/*.md               # SINH từ app/agents/prompts.py — không sửa tay
 ```

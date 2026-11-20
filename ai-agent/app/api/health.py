@@ -20,7 +20,7 @@ async def health(request: Request) -> dict[str, Any]:
             db_ok = False
     return {"status": "ok" if st.mqtt.connected and db_ok else "degraded",
             "mqtt": st.mqtt.connected, "db": db_ok, "langfuse": st.tracer.enabled,
-            "agent": st.agent is not None}
+            "agent": st.agent is not None, "memory": st.memory is not None}
 
 
 @router.get("/rules/state", dependencies=[Depends(require_internal_key)])

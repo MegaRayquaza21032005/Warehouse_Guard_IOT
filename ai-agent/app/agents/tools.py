@@ -7,6 +7,7 @@
 | analyst      | search_incidents, search_warehouse_facts, search_feedback                                | đọc  |
 | control      | control_fan, control_mist, control_light, update_thresholds                              | GHI  |
 | notification | publish_alert                                                                            | GHI  |
+| supervisor   | save_memory (personal: lưu ngay; warehouse: cần người dùng xác nhận)                     | GHI  |
 
 Tool GHI:
 - Luồng chat: Safety Guard -> bị chặn: log `blocked_by_policy`; được phép: log `pending_confirmation` + tạo
@@ -62,6 +63,7 @@ class Services:
     dispatcher: Any              # AlertDispatcher
     logger: ToolCallLogger
     pool: Any = None
+    memory: Any = None           # MemoryService (giai đoạn 5); None = chưa có long-term memory
 
     def guard_context(self) -> guard.GuardContext:
         e = self.engine
@@ -133,6 +135,7 @@ class WritePlan:
     verdict: guard.Verdict
     args: dict[str, Any]              # tham số đã chuẩn hóa để thực thi
     description: str
+    needs_confirmation: bool = True   # luồng chat: False = thực thi ngay (vd. ghi nhớ sở thích cá nhân)
 
 
 def make_write_tool(services: Services, ctx: RunContext, executor: "ActionExecutor", agent: str, name: str,
@@ -152,7 +155,7 @@ def make_write_tool(services: Services, ctx: RunContext, executor: "ActionExecut
                 await lg.update(call, "blocked_by_policy", error=p.verdict.reason)
                 return f"BỊ CHẶN bởi Safety Guard: {p.verdict.reason}"
 
-            if ctx.flow == "chat":
+            if ctx.flow == "chat" and p.needs_confirmation:
                 await lg.start(call, status="pending_confirmation")
                 proposal = {"id": str(call.id), "agent": agent, "tool": name, "kind": p.kind, "args": p.args,
                             "description": p.description, "note": p.verdict.note, "call_id": ctx.current_call_id,
@@ -162,9 +165,9 @@ def make_write_tool(services: Services, ctx: RunContext, executor: "ActionExecut
                 return (f"ĐÃ TẠO ĐỀ XUẤT (chưa thực hiện): {p.description}.{note} Hệ thống sẽ hiện nút "
                         f"[Đồng ý]/[Hủy] cho người dùng.")
 
-            # luồng sự cố: thực thi ngay
+            # luồng sự cố (hoặc hành động không cần xác nhận): thực thi ngay
             await lg.start(call)
-            outcome = await executor.run(p.kind, p.args, ctx, confirmed_by=None)
+            outcome = await executor.run(p.kind, p.args, ctx, confirmed_by=ctx.user_id if ctx.flow == "chat" else None)
             await lg.update(call, outcome["status"], result=outcome, error=outcome.get("error"))
             return f"{outcome['status'].upper()}: {outcome['text']}"
         except ToolLogUnavailable as e:
@@ -190,6 +193,8 @@ class ActionExecutor:
                 return await self._config(args)
             if kind == "alert":
                 return self._alert(args, ctx)
+            if kind == "memory":
+                return await self._memory(args, ctx)
             if kind == "incident_alert":
                 ctx.alert_content = {"message": args["message"], "push": args.get("push", True)}
                 return {"status": "success", "text": "Đã giao nội dung cho bộ gửi cảnh báo của tầng luật"}
@@ -241,6 +246,23 @@ class ActionExecutor:
                     "error": "mqtt_unavailable"}
         log.info("-> warehouse/cmd/config %s", json.dumps(a["changes"], ensure_ascii=False))
         return {"status": "success", "text": f"Đã gửi ngưỡng mới xuống ESP32: {a['changes']}", "config": merged}
+
+    async def _memory(self, a: dict[str, Any], ctx: RunContext) -> dict[str, Any]:
+        from app.memory.store import NS_FACTS, NS_FEEDBACK, ns_profile
+        mem = self.s.memory
+        if mem is None:
+            return {"status": "error", "text": "Chưa bật long-term memory", "error": "memory_disabled"}
+        v = guard.check_memory(a["text"])
+        if not v.allowed:
+            return {"status": "blocked_by_policy", "text": f"Không lưu: {v.reason}", "error": v.reason}
+        ns, kind, where = {"warehouse": (NS_FACTS, "fact", "kiến thức chung về kho"),
+                           "feedback": (NS_FEEDBACK, "feedback", "phản hồi về cảnh báo")}.get(
+            a["scope"], (ns_profile(ctx.user_id), "preference", "hồ sơ cá nhân"))
+        if await mem.is_duplicate(ns, a["text"]):
+            return {"status": "success", "text": "Đã có ghi nhớ gần giống, không lưu lại", "duplicate": True}
+        key = await mem.put(ns, a["text"], kind=kind, created_by=ctx.user_id, source="chat",
+                            extra={"trace_id": ctx.trace_id})
+        return {"status": "success", "text": f"Đã ghi nhớ vào {where}: “{a['text']}”", "key": key}
 
     def _alert(self, a: dict[str, Any], ctx: RunContext) -> dict[str, Any]:
         alert = Alert("manual_notice", a["level"], a["message"], None,
@@ -321,6 +343,13 @@ class ChatAlertArgs(BaseModel):
     message: str = Field(description="Nội dung thông báo (tiếng Việt)")
     level: Literal["info", "warning", "critical"] = "info"
     push: bool = Field(True, description="Đẩy thông báo lên điện thoại")
+
+
+class SaveMemoryArgs(BaseModel):
+    text: str = Field(description="Câu ngắn, tự đủ nghĩa, tiếng Việt (tối đa 500 ký tự)")
+    scope: Literal["personal", "warehouse", "feedback"] = Field(
+        description="personal = sở thích của chính người dùng (lưu ngay); warehouse = kiến thức chung về kho "
+                    "(người dùng phải bấm Đồng ý); feedback = người dùng khẳng định một cảnh báo đúng / báo giả")
 
 
 class IncidentAlertArgs(BaseModel):
@@ -443,13 +472,14 @@ def build_monitor_tools(s: Services, ctx: RunContext) -> list[StructuredTool]:
 
 
 def build_analyst_tools(s: Services, ctx: RunContext) -> list[StructuredTool]:
-    async def search_incidents(query: str = "", limit: int = 5) -> Any:
+    from app.memory.store import NS_FACTS, NS_FEEDBACK, NS_INCIDENTS
+
+    async def recent_incidents(limit: int) -> list[dict[str, Any]]:
         if s.pool is None:
-            return {"results": [], "note": "Không có kết nối DB"}
+            return []
         async with s.pool.connection() as conn:
             cur = await conn.execute(
-                """SELECT id, kind, level, state, opened_at, closed_at, jsonb_array_length(events) AS n_events,
-                          events -> -1 AS last_event
+                """SELECT id, kind, level, state, opened_at, closed_at, jsonb_array_length(events) AS n_events
                    FROM agent.incidents ORDER BY opened_at DESC LIMIT %s""", (limit,))
             cols = [c.name for c in cur.description]
             rows = [dict(zip(cols, r)) for r in await cur.fetchall()]
@@ -458,21 +488,42 @@ def build_analyst_tools(s: Services, ctx: RunContext) -> list[StructuredTool]:
                 r["duration_min"] = round((r["closed_at"] - r["opened_at"]).total_seconds() / 60, 1)
             r["opened_at"] = r["opened_at"].astimezone(VN).isoformat(timespec="seconds")
             r["closed_at"] = r["closed_at"].astimezone(VN).isoformat(timespec="seconds") if r["closed_at"] else None
-        return {"results": rows, "note": "Danh sách sự cố gần nhất (tìm theo ngữ nghĩa sẽ có ở giai đoạn 5)"}
+        return rows
+
+    def clean(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        keep = ("text", "score", "created_at", "kind", "verdict", "alert_type", "level", "state", "opened_at",
+                "duration_min")
+        return [{k: it[k] for k in keep if k in it} for it in items]
+
+    async def search_incidents(query: str = "", limit: int = 5) -> Any:
+        if s.memory is not None and query.strip():
+            found = clean(await s.memory.search(NS_INCIDENTS, query, limit=limit))
+            if found:
+                return {"results": found, "note": "Tóm tắt sự cố đã đóng, xếp theo độ liên quan"}
+        return {"results": await recent_incidents(limit),
+                "note": "Không có tóm tắt liên quan — đây là các sự cố gần nhất (chưa tóm tắt)"}
 
     async def search_warehouse_facts(query: str = "", limit: int = 5) -> Any:
-        return {"results": [], "note": "Chưa có long-term memory (giai đoạn 5) — chưa có kiến thức về kho"}
+        if s.memory is None:
+            return {"results": [], "note": "Chưa bật long-term memory"}
+        items = await (s.memory.search(NS_FACTS, query, limit=limit) if query.strip()
+                       else s.memory.list_items(NS_FACTS, limit=limit))
+        return {"results": clean(items)}
 
     async def search_feedback(query: str = "", limit: int = 5) -> Any:
-        return {"results": [], "note": "Chưa có long-term memory (giai đoạn 5) — chưa có phản hồi báo giả"}
+        if s.memory is None:
+            return {"results": [], "note": "Chưa bật long-term memory"}
+        items = await (s.memory.search(NS_FEEDBACK, query, limit=limit) if query.strip()
+                       else s.memory.list_items(NS_FEEDBACK, limit=limit))
+        return {"results": clean(items)}
 
     T = make_read_tool
     return [
-        T(s, ctx, "analyst", "search_incidents", "Sự cố cũ (cháy, khí, đột nhập, offline): diễn biến, thời gian.",
-          SearchArgs, search_incidents),
-        T(s, ctx, "analyst", "search_warehouse_facts", "Kiến thức đã ghi nhớ về kho (giờ làm, hàng hóa, thói quen).",
-          SearchArgs, search_warehouse_facts),
-        T(s, ctx, "analyst", "search_feedback", "Phản hồi của người dùng về cảnh báo (đúng / báo giả).",
+        T(s, ctx, "analyst", "search_incidents", "Sự cố cũ đã đóng (cháy, khí, đột nhập, offline): diễn biến, thời "
+          "điểm, thời gian kéo dài. Tìm theo ngữ nghĩa.", SearchArgs, search_incidents),
+        T(s, ctx, "analyst", "search_warehouse_facts", "Kiến thức đã ghi nhớ về kho (giờ làm, hàng hóa, thói quen như "
+          "hàn kim loại...). Tìm theo ngữ nghĩa.", SearchArgs, search_warehouse_facts),
+        T(s, ctx, "analyst", "search_feedback", "Phản hồi của người dùng về cảnh báo cũ (đúng / báo giả + lý do).",
           SearchArgs, search_feedback),
     ]
 
@@ -528,6 +579,20 @@ def build_notification_tools(s: Services, ctx: RunContext, ex: ActionExecutor) -
         schema = ChatAlertArgs
         desc = "Phát thông báo / cảnh báo tới mọi người dùng (cần người dùng xác nhận)."
     return [make_write_tool(s, ctx, ex, "notification", "publish_alert", desc, schema, plan)]
+
+
+def build_supervisor_tools(s: Services, ctx: RunContext, ex: ActionExecutor) -> list[StructuredTool]:
+    """Supervisor chỉ có MỘT tool không phải giao việc: save_memory (CLAUDE.md mục 7)."""
+    def plan(text: str, scope: str = "personal") -> WritePlan:
+        if s.memory is None:
+            return WritePlan("memory", guard.Verdict.block("Chưa bật long-term memory"), {}, "")
+        v = guard.check_memory(text)
+        where = {"warehouse": "kiến thức chung về kho (mọi người dùng)",
+                 "feedback": "phản hồi về cảnh báo"}.get(scope, "hồ sơ cá nhân của bạn")
+        return WritePlan("memory", v, {"text": text.strip(), "scope": scope}, f"Ghi nhớ vào {where}: “{text.strip()}”",
+                         needs_confirmation=(scope == "warehouse"))
+    return [make_write_tool(s, ctx, ex, "supervisor", "save_memory",
+                            "Ghi nhớ lâu dài theo yêu cầu của người dùng.", SaveMemoryArgs, plan)]
 
 
 def tools_for(worker: str, s: Services, ctx: RunContext, ex: ActionExecutor) -> list[StructuredTool]:

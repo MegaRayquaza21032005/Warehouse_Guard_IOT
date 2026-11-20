@@ -51,6 +51,7 @@ class AgentService:
         self.busy: set[str] = set()
         self.incident_locks: dict[str, asyncio.Lock] = {}
         self._bg: set[asyncio.Task] = set()
+        self.extractor = None        # MemoryExtractor (giai đoạn 5): chạy nền sau mỗi lượt chat
 
     # ============================================================================ hội thoại (bảng agent.chat_*)
     def _need_db(self) -> None:
@@ -161,7 +162,8 @@ class AgentService:
                  " 🎤" if input_mode == "voice" else "", message[:200])
         graph_input = {"messages": [HumanMessage(message)], "mode": "chat", "user_id": user_id,
                        "username": username or "", "trace_id": trace_id, "thread_id": thread_id, "steps": 0,
-                       "pending": None, "outcomes": None, "alert": None, "alert_content": None}
+                       "pending": None, "outcomes": None, "alert": None, "alert_content": None,
+                       "memory_context": None}
         return self._stream(graph_input, thread_id, trace_id, user_id)
 
     async def start_confirm(self, *, user_id: int, thread_id: str, approved: bool) -> AsyncIterator[dict[str, str]]:
@@ -237,6 +239,7 @@ class AgentService:
                      time.monotonic() - started, len(text))
             await q.put(("done", {"message": text, "blocks": blocks, "speech": speech, "thread_id": thread_id,
                                   "trace_id": trace_id, "outcomes": snap.values.get("outcomes")}))
+            self._extract_after_chat(snap.values, user_id, thread_id, trace_id, text)
         except TimeoutError:
             msg = f"Quá thời gian xử lý ({self.s.chat_timeout_s}s). Vui lòng thử lại."
             log.error("Timeout thread=%s trace=%s", thread_id, trace_id)
@@ -251,6 +254,23 @@ class AgentService:
         finally:
             self.busy.discard(thread_id)
             await q.put(None)
+
+    def _extract_after_chat(self, values: dict[str, Any], user_id: int, thread_id: str, trace_id: str,
+                            answer: str) -> None:
+        """Bước trích xuất memory chạy NỀN sau khi đã trả lời (không làm chậm câu trả lời)."""
+        if self.extractor is None or not self.s.memory_extract_enabled:
+            return
+        msgs = values.get("messages", [])
+        last_h = max((i for i, m in enumerate(msgs) if isinstance(m, HumanMessage)), default=None)
+        if last_h is None:
+            return
+        turn = msgs[last_h + 1:]
+        # Lượt này Supervisor đã tự ghi nhớ theo yêu cầu -> không trích xuất lại (tránh trùng / lưu sai chỗ)
+        if any(isinstance(m, AIMessage) and any(tc["name"] == "save_memory" for tc in m.tool_calls) for m in turn):
+            return
+        user_text = text_of(msgs[last_h])
+        self.extractor.spawn(self.extractor.after_chat(user_id=user_id, thread_id=thread_id, trace_id=trace_id,
+                                                       user_text=user_text, assistant_text=answer))
 
     # ============================================================================ luồng sự cố
     async def enrich(self, alert: Alert) -> dict[str, Any] | None:
@@ -270,7 +290,7 @@ class AgentService:
         graph_input = {"messages": [human], "mode": "incident", "user_id": None, "username": "",
                        "trace_id": trace_id, "thread_id": thread_id, "steps": 0, "pending": None, "outcomes": None,
                        "alert": {"type": alert.type, "level": alert.level, "message": alert.message},
-                       "alert_content": None}
+                       "alert_content": None, "memory_context": None}
         config = self._config(thread_id, trace_id, None, "incident")
         handler = self.tracer.langchain_handler(trace_id)
         if handler:

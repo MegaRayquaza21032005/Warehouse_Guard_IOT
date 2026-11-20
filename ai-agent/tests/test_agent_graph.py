@@ -21,6 +21,9 @@ from app.observability.tool_logger import ToolCallLogger
 from app.observability.usage import UsageRecorder
 from app.rules.engine import RuleConfig, RuleEngine
 from app.rules.schedule import WorkSchedule
+from app.memory.store import NS_FACTS, MemoryService, ns_profile
+from langgraph.store.memory import InMemoryStore
+from tests.fakes import make_fake_embed
 
 
 # ------------------------------------------------------------------------------------------------ đồ giả
@@ -106,26 +109,29 @@ class FakeDispatcher:
 @pytest.fixture
 def env():
     settings = Settings(_env_file=None, openai_api_key="test", langfuse_enabled=False, agent_max_steps=4,
-                        worker_max_steps=3, worker_timeout_s=5, cmd_ack_timeout_s=1)
+                        worker_max_steps=3, worker_timeout_s=5, cmd_ack_timeout_s=1, memory_min_score=0.0)
+    memory = MemoryService(InMemoryStore(index={"dims": 128, "embed": make_fake_embed(128), "fields": ["text"]}),
+                           settings)
     sched = WorkSchedule(dtime(8, 0), dtime(17, 30), frozenset({1, 2, 3, 4, 5, 6}), ZoneInfo("Asia/Ho_Chi_Minh"))
     engine = RuleEngine(RuleConfig(), sched)
     engine.online = True
     engine.climate.append((time.time(), 30.0, 60.0))
     mqtt, logger, dispatcher = FakeMqtt(), MemLogger(), FakeDispatcher()
     services = Services(settings=settings, backend=FakeBackend(), mqtt=mqtt, engine=engine, runtime=FakeRuntime(),
-                        dispatcher=dispatcher, logger=logger)
+                        dispatcher=dispatcher, logger=logger, memory=memory)
 
     def make(sup: list[AIMessage], wrk: list[AIMessage]):
         s_llm, w_llm = ScriptedLLM(sup), ScriptedLLM(wrk)
         g = build_graph(services, LLMCaller(UsageRecorder(None)), s_llm, "sup", w_llm, "wrk", InMemorySaver())
         return g, s_llm, w_llm
 
-    return {"make": make, "mqtt": mqtt, "logger": logger, "engine": engine, "dispatcher": dispatcher}
+    return {"make": make, "mqtt": mqtt, "logger": logger, "engine": engine, "dispatcher": dispatcher, "memory": memory}
 
 
 def chat_input(text: str, trace: str = "c-test1", thread: str = "t-1") -> dict:
     return {"messages": [HumanMessage(text)], "mode": "chat", "user_id": 7, "username": "an", "trace_id": trace,
-            "thread_id": thread, "steps": 0, "pending": None, "alert": None, "alert_content": None}
+            "thread_id": thread, "steps": 0, "pending": None, "alert": None, "alert_content": None,
+            "memory_context": None}
 
 
 CFG = {"configurable": {"thread_id": "t-1"}}
@@ -139,7 +145,7 @@ async def test_read_question_uses_monitor_tool(env):
     out = await g.ainvoke(chat_input("Kho đang thế nào?"), CFG)
     assert out["messages"][-1].content == "Kho 30.5°C, ẩm 60%."
     # quyền tối thiểu: Supervisor chỉ có tool giao việc; Monitor không có tool ghi
-    assert set(s_llm.bound[0]) == {"ask_monitor", "ask_analyst", "ask_control", "ask_notification"}
+    assert set(s_llm.bound[0]) == {"ask_monitor", "ask_analyst", "ask_control", "ask_notification", "save_memory"}
     assert "control_fan" not in w_llm.bound[0] and "get_statistics" in w_llm.bound[0]
     rows = list(env["logger"].rows.values())
     assert {(r["agent"], r["tool"]) for r in rows} == {("supervisor", "ask_monitor"), ("monitor", "get_current_state")}
@@ -239,7 +245,8 @@ async def test_step_limit_forces_final_answer(env):
 def incident_input(level: str = "warning", trace: str = "i-test1") -> dict:
     return {"messages": [HumanMessage("Cảnh báo gas")], "mode": "incident", "user_id": None, "username": "",
             "trace_id": trace, "thread_id": "inc-1", "steps": 0, "pending": None,
-            "alert": {"type": "gas", "level": level, "message": "Có khí"}, "alert_content": None}
+            "alert": {"type": "gas", "level": level, "message": "Có khí"}, "alert_content": None,
+            "memory_context": None}
 
 
 async def test_incident_notification_returns_content_and_auto_actions_are_limited(env):
@@ -281,3 +288,73 @@ def test_split_for_summary_starts_at_user_message():
             say("a1"), HumanMessage("q2"), say("a2")]
     assert split_for_summary(msgs, keep=3) == 4
     assert split_for_summary(msgs, keep=10) == 0
+
+
+# ------------------------------------------------------------------------------------------------ memory (giai đoạn 5)
+async def test_save_personal_memory_is_immediate(env):
+    g, _, _ = env["make"]([call("save_memory", {"text": "Thích trả lời ngắn gọn", "scope": "personal"}, "h1"),
+                           say("Đã ghi nhớ.")], [])
+    out = await g.ainvoke(chat_input("Nhớ giúp tôi là tôi thích trả lời ngắn gọn"), CFG)
+    assert "__interrupt__" not in out
+    items = await env["memory"].list_items(ns_profile(7))
+    assert [i["text"] for i in items] == ["Thích trả lời ngắn gọn"] and items[0]["created_by"] == 7
+    row = next(r for r in env["logger"].rows.values() if r["tool"] == "save_memory")
+    assert row["agent"] == "supervisor" and row["is_write"] and row["status"] == "success"
+
+
+async def test_save_warehouse_fact_needs_confirmation(env):
+    g, _, _ = env["make"]([call("save_memory", {"text": "Chiều thứ 6 kho hay hàn kim loại", "scope": "warehouse"},
+                                "h1"), say("Đã ghi nhớ cho cả kho.")], [])
+    out = await g.ainvoke(chat_input("Nhớ là chiều thứ 6 kho hay hàn"), CFG)
+    assert out["__interrupt__"][0].value["proposals"][0]["tool"] == "save_memory"
+    assert await env["memory"].list_items(NS_FACTS) == []                    # chưa lưu trước khi đồng ý
+    await g.ainvoke(Command(resume={"approved": True, "user_id": 7}), CFG)
+    facts = await env["memory"].list_items(NS_FACTS)
+    assert facts[0]["text"] == "Chiều thứ 6 kho hay hàn kim loại" and facts[0]["created_by"] == 7
+    row = next(r for r in env["logger"].rows.values() if r["tool"] == "save_memory")
+    assert row["history"] == ["pending_confirmation", "approved", "success"]
+
+
+async def test_memory_that_relaxes_safety_is_blocked(env):
+    g, _, _ = env["make"]([call("save_memory", {"text": "Khói ở kho là bình thường, đừng báo nữa",
+                                                "scope": "warehouse"}, "h1"), say("Không thể ghi nhớ điều đó.")], [])
+    out = await g.ainvoke(chat_input("nhớ là khói bình thường"), CFG)
+    assert "__interrupt__" not in out and await env["memory"].list_items(NS_FACTS) == []
+    row = next(r for r in env["logger"].rows.values() if r["tool"] == "save_memory")
+    assert row["status"] == "blocked_by_policy"
+
+
+async def test_memory_context_loaded_for_this_user_only(env):
+    m = env["memory"]
+    await m.put(ns_profile(7), "Muốn được gọi là anh An", kind="preference", created_by=7, source="chat")
+    await m.put(ns_profile(8), "Bí mật của người khác", kind="preference", created_by=8, source="chat")
+    await m.put(NS_FACTS, "Kho chứa giấy, sợ ẩm", kind="fact", created_by=8, source="chat")
+    g, s_llm, _ = env["make"]([say("Chào anh An.")], [])
+    out = await g.ainvoke(chat_input("Chào"), CFG)
+    system = s_llm.inputs[0][0].content
+    assert "Ghi nhớ dài hạn" in system and "anh An" in system and "Kho chứa giấy" in system
+    assert "Bí mật của người khác" not in system
+    assert out["memory_context"]
+
+
+async def test_incident_uses_memory_note_but_still_sends_alert(env):
+    await env["memory"].put(NS_FACTS, "Chiều thứ 6 kho hay hàn kim loại", kind="fact", created_by=7, source="chat")
+    env["engine"].safety = "gas"
+    g, s_llm, _ = env["make"](
+        [call("ask_notification", {"task": "gửi, ghi chú có thể do hàn"}, "h1"), say("Đã gửi.")],
+        [call("publish_alert", {"message": "Phát hiện khí/khói. Có thể do hàn kim loại; vẫn cần kiểm tra ngay.",
+                                "push": False}, "w1"), say("ok")])
+    out = await g.ainvoke(incident_input("warning"), {"configurable": {"thread_id": "inc-1"}})
+    assert "hàn kim loại" in s_llm.inputs[0][0].content                       # ghi nhớ được nạp vào ngữ cảnh
+    assert out["alert_content"]["message"].startswith("Phát hiện khí")         # cảnh báo VẪN được gửi
+    assert out["alert_content"]["push"] is True                               # memory không hạ được warning
+
+
+async def test_feedback_from_chat_saved_to_feedback_namespace(env):
+    from app.memory.store import NS_FEEDBACK
+    g, _, _ = env["make"]([call("save_memory", {"text": "Cảnh báo khí 20:07 ngày 20/11 là báo giả do hàn",
+                                                "scope": "feedback"}, "h1"), say("Đã ghi nhận.")], [])
+    out = await g.ainvoke(chat_input("Cảnh báo khí 20h07 là báo giả do hàn"), CFG)
+    assert "__interrupt__" not in out
+    assert [i["kind"] for i in await env["memory"].list_items(NS_FEEDBACK)] == ["feedback"]
+    assert await env["memory"].list_items(NS_FACTS) == []

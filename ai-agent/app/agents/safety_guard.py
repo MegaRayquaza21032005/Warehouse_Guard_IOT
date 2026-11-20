@@ -141,3 +141,29 @@ def check_config(patch: dict[str, Any], current: dict[str, Any]) -> tuple[Verdic
     if merged["mistHumMax"] >= merged["humHigh"]:
         return Verdict.block("mistHumMax phải nhỏ hơn humHigh"), {}
     return Verdict.ok(), merged
+
+
+# ============================================================================================ memory (mục 7)
+MEMORY_MAX_CHARS = 500
+# Memory KHÔNG được nới lỏng luật an toàn: câu kiểu "khói là bình thường, đừng báo nữa" bị từ chối ngay ở code.
+_RELAX_PATTERNS = (
+    "đừng báo", "không cần báo", "khỏi báo", "thôi báo", "ngừng báo", "đừng cảnh báo", "không cần cảnh báo",
+    "tắt cảnh báo", "bỏ qua cảnh báo", "bỏ cảnh báo", "không phải báo", "đừng gửi cảnh báo", "không báo nữa",
+    "là bình thường", "không nguy hiểm", "đừng bật quạt", "đừng phun", "nới ngưỡng", "tăng ngưỡng",
+)
+
+
+def check_memory(text: str) -> Verdict:
+    t = (text or "").strip()
+    if not t:
+        return Verdict.block("Nội dung ghi nhớ trống")
+    if len(t) > MEMORY_MAX_CHARS:
+        return Verdict.block(f"Nội dung ghi nhớ tối đa {MEMORY_MAX_CHARS} ký tự")
+    from app.observability.redact import redact
+    if redact(t) != t:
+        return Verdict.block("Không lưu mật khẩu / khóa / token vào bộ nhớ")
+    low = t.lower()
+    if any(p in low for p in _RELAX_PATTERNS):
+        return Verdict.block("Bộ nhớ không được dùng để tắt / nới lỏng cảnh báo hay luật an toàn — muốn đổi "
+                             "ngưỡng hãy đổi cấu hình chính thức (có xác nhận)")
+    return Verdict.ok()

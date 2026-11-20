@@ -107,6 +107,17 @@ Java BE gắn `user_id` (và `username`) **lấy từ JWT** rồi gọi ai-agent
 | POST | `/api/voice/tts` | `{"text"}` (≤ 4000 ký tự) → `audio/mpeg` |
 | GET | `/api/agent/tool-calls?traceId&threadId&agent&tool&status&flow&from&to&page&size` | Nhật ký tool call. `ADMIN` xem tất cả (+ `userId`); người dùng thường chỉ thấy của mình + luồng sự cố |
 
+### Long-term memory — `/api/memories` (trung gian tới AI Agent)
+
+| Method | Path | Ghi chú |
+|--------|------|---------|
+| GET | `/api/memories?limit` | Memory **cá nhân** của tôi (`key`, `text`, `kind`, `source`, `created_at`) |
+| DELETE | `/api/memories/{key}` | Xóa memory cá nhân của tôi. 204 · 404 `memory_not_found` |
+| GET | `/api/memories/warehouse?kind=facts\|incidents\|feedback&page&size` | Memory dùng chung (ai cũng xem) |
+| DELETE | `/api/memories/warehouse/{key}` | Xóa kiến thức kho — người tạo hoặc `ADMIN`; khác → 403 `not_owner` |
+
+`POST /api/alerts/{id}/feedback` ngoài lưu ở Java BE còn **chạy nền** gửi sang memory `warehouse/feedback` của agent (lỗi không ảnh hưởng kết quả).
+
 Lỗi từ agent giữ nguyên mã: 404 `thread_not_found`, 409 `confirmation_pending` / `thread_busy` / `no_pending_confirmation`, 429 `rate_limited`, 503 `llm_disabled`.
 
 **Sự kiện SSE:** `meta` → (`status` | `token` | `discard`)* → `confirmation` **hoặc** `done` **hoặc** `error`; sau `/confirm`: `meta` → `result` → … → `done`. Chi tiết `data` của từng sự kiện: [../ai-agent/README.md](../ai-agent/README.md#api-nội-bộ-chỉ-java-be-gọi-header-x-internal-key). Đọc stream bằng `fetch` + `ReadableStream` (EventSource không gửi được POST / header `Authorization`).
