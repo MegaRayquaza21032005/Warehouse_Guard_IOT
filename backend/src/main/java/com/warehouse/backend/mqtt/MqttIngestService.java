@@ -19,6 +19,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import com.warehouse.backend.alert.AlertRepository;
+import com.warehouse.backend.push.PushService;
 import com.warehouse.backend.auth.UserRepository;
 import com.warehouse.backend.device.CommandLogRepository;
 import com.warehouse.backend.device.CommandLogRepository.NewLog;
@@ -51,9 +52,11 @@ public class MqttIngestService {
     private final UserRepository users;
     private final LiveStateService live;
     private final LiveBroadcaster broadcaster;
+    private final PushService push;
 
     public MqttIngestService(ObjectMapper mapper, TelemetryRepository telemetry, CommandLogRepository commandLogs,
-            AlertRepository alerts, UserRepository users, LiveStateService live, LiveBroadcaster broadcaster) {
+            AlertRepository alerts, UserRepository users, LiveStateService live, LiveBroadcaster broadcaster,
+            PushService push) {
         this.mapper = mapper;
         this.telemetry = telemetry;
         this.commandLogs = commandLogs;
@@ -61,6 +64,7 @@ public class MqttIngestService {
         this.users = users;
         this.live = live;
         this.broadcaster = broadcaster;
+        this.push = push;
     }
 
     public void handle(String topic, byte[] payload, boolean retained) {
@@ -199,7 +203,9 @@ public class MqttIngestService {
         String level = Optional.ofNullable(str(d, "level")).orElse("info");
         long id = alerts.insert(type, level, str(d, "message"), str(d, "source"), str(d, "incident_id"),
                 toJson(d));
-        return alerts.find(id).orElse(d);
+        Map<String, Object> saved = alerts.find(id).orElse(d);
+        push.onAlert(saved);
+        return saved;
     }
 
     // ---------------- Tiện ích ----------------

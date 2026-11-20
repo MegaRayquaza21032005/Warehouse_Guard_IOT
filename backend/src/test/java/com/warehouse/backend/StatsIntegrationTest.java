@@ -110,6 +110,65 @@ class StatsIntegrationTest extends IntegrationTestBase {
                 .andExpect(jsonPath("$.series[0].points[0].t").value("2026-01-04T17:00:00Z")); // nửa đêm giờ VN
     }
 
+    private void alert(String time, String type, String level, String feedback, String payload) {
+        jdbc.sql("INSERT INTO app.alerts (ts, type, level, message, source, payload, feedback)"
+                + " VALUES (?, ?, ?, 'm', 'rule', ?::jsonb, ?)")
+                .params(OffsetDateTime.parse(DAY + time + "+07:00"), type, level, payload, feedback).update();
+    }
+
+    private void health(String time, Boolean online, Integer rssi) {
+        jdbc.sql("INSERT INTO app.device_health (ts, online, rssi) VALUES (?, ?, ?)")
+                .params(OffsetDateTime.parse(DAY + time + "+07:00"), online, rssi).update();
+    }
+
+    @Test
+    void alertAndSystemMetrics() throws Exception {
+        alert("00:10:00", "gas", "warning", "false_alarm", "{}");
+        alert("00:20:00", "gas", "warning", "true_alarm", "{}");
+        alert("00:30:00", "fire", "critical", null, "{}");
+        alert("00:40:00", "recovered", "info", null, "{\"details\":{\"duration_min\":12}}");
+        alert("01:40:00", "recovered", "info", null, "{\"details\":{\"duration_min\":18}}");
+        mvc.perform(get("/api/stats?metric=alert_count&interval=1h&group_by=type" + range("00:00:00", "02:00:00"))
+                .header("Authorization", auth))
+                .andExpect(jsonPath("$.series[?(@.name=='gas')].points[0].v").value(2.0))
+                .andExpect(jsonPath("$.series[?(@.name=='recovered')].points.length()").value(2));
+        mvc.perform(get("/api/stats?metric=false_alarm_rate&interval=1d" + range("00:00:00", "23:00:00"))
+                .header("Authorization", auth)).andExpect(jsonPath("$.series[0].points[0].v").value(50.0));
+        mvc.perform(get("/api/stats?metric=incident_resolve_minutes" + range("00:00:00", "02:00:00"))
+                .header("Authorization", auth)).andExpect(jsonPath("$.series[0].points[0].v").value(15.0));
+
+        health("00:00:00", true, null);
+        health("00:05:00", null, -60);
+        health("00:35:00", null, -50);
+        health("01:00:00", false, null);
+        health("01:30:00", true, null);
+        mvc.perform(get("/api/stats?metric=device_online" + range("00:00:00", "02:00:00"))
+                .header("Authorization", auth))
+                .andExpect(jsonPath("$.series[0].name").value("uptime_pct"))
+                .andExpect(jsonPath("$.series[0].points[0].v").value(75.0));
+        mvc.perform(get("/api/stats?metric=rssi&interval=1h" + range("00:00:00", "02:00:00"))
+                .header("Authorization", auth)).andExpect(jsonPath("$.series[0].points[0].v").value(-55.0));
+    }
+
+    @Test
+    void motionEventsOnlyAfterHours() throws Exception {
+        for (String t : new String[] { "09:00:00", "20:00:00", "22:15:00" }) {
+            jdbc.sql("INSERT INTO app.motion_events (ts, motion) VALUES (?, true)")
+                    .params(OffsetDateTime.parse(DAY + t + "+07:00")).update();
+        }
+        mvc.perform(get("/api/stats?metric=motion_events" + range("00:00:00", "23:59:59"))
+                .header("Authorization", auth))
+                .andExpect(jsonPath("$.series[0].name").value("after_hours"))
+                .andExpect(jsonPath("$.series[0].points.length()").value(2))
+                .andExpect(jsonPath("$.series[0].points[0].t").value("2026-01-05T13:00:00Z"));
+        for (int i = 0; i < 10; i++) {
+            jdbc.sql("INSERT INTO app.mq2_readings (ts, raw, mv, level, warming_up) VALUES (?, ?, 0, 'normal', false)")
+                    .params(OffsetDateTime.parse(DAY + "00:0" + i + ":00+07:00"), 100 + i * 10).update();
+        }
+        mvc.perform(get("/api/stats?metric=mq2_baseline&interval=1h" + range("00:00:00", "01:00:00"))
+                .header("Authorization", auth)).andExpect(jsonPath("$.series[0].points[0].v").value(109.0));
+    }
+
     @Test
     void rejectsBadParameters() throws Exception {
         mvc.perform(get("/api/stats?metric=foo").header("Authorization", auth)).andExpect(status().isBadRequest());

@@ -12,7 +12,7 @@ cd backend
 mvn spring-boot:run                  # hoặc: mvn package -DskipTests && java -jar target/backend-0.0.1-SNAPSHOT.jar
 ```
 
-- Cấu hình đọc từ `../.env` (phải chạy trong thư mục `backend/`): `POSTGRES_*`, `MQTT_BACKEND_*`, `JWT_SECRET`, `JWT_ACCESS_TTL_MIN`, `JWT_REFRESH_TTL_DAYS`, `INTERNAL_API_KEY`, `WORK_HOURS_*`, `WORK_DAYS`, `CORS_ALLOWED_ORIGINS`, `BACKEND_PORT` (8080), `AGENT_PORT` / `AGENT_URL` (AI Agent, mặc định `http://localhost:8000`).
+- Cấu hình đọc từ `../.env` (phải chạy trong thư mục `backend/`): `POSTGRES_*`, `MQTT_BACKEND_*`, `JWT_SECRET`, `JWT_ACCESS_TTL_MIN`, `JWT_REFRESH_TTL_DAYS`, `INTERNAL_API_KEY`, `WORK_HOURS_*`, `WORK_DAYS`, `CORS_ALLOWED_ORIGINS`, `BACKEND_PORT` (8080), `AGENT_PORT` / `AGENT_URL` (AI Agent, mặc định `http://localhost:8000`), `FCM_CREDENTIALS_FILE` (push, trống = tắt).
 - Migration Flyway tự chạy khi khởi động (`src/main/resources/db/migration`).
 - Broker chưa chạy → app vẫn khởi động, tự kết nối lại mỗi 5 giây.
 
@@ -53,7 +53,7 @@ Lỗi luôn có dạng `{"error": "<mã>", "message": "...", "details": {...}}`.
 
 | Method | Path | Ghi chú |
 |--------|------|---------|
-| GET | `/api/state` | Snapshot hiện tại: `online`, `device`, `safety`, `sensors{mq2,dht11,pir}`, `devices{fan,mist,light}`, `config`, `brokerConnected`. Mỗi mục `{"data": <payload MQTT>, "updatedAt"}` |
+| GET | `/api/state` | Snapshot hiện tại: `online`, `device`, `safety`, `sensors{mq2,dht11,pir}`, `devices{fan,mist,light}`, `config`, `brokerConnected`, `workHours{start,end,days,timezone}`. Mỗi mục `{"data": <payload MQTT>, "updatedAt"}`, hoặc `null` nếu ESP32 chưa từng gửi |
 | GET | `/api/readings/{kind}?from&to&limit&device` | Dữ liệu thô, mới nhất trước. `kind`: `mq2`, `climate`, `motion`, `safety`, `health`, `device-states`. Mặc định 1 giờ gần nhất, tối đa 5000 dòng |
 
 ### Thiết bị
@@ -70,7 +70,7 @@ Lỗi luôn có dạng `{"error": "<mã>", "message": "...", "details": {...}}`.
 
 | Method | Path | Ghi chú |
 |--------|------|---------|
-| GET | `/api/alerts?level&unacked&page&size` | Mới nhất trước |
+| GET | `/api/alerts?level&unacked&page&size` | Mới nhất trước. Mỗi cảnh báo: `id, ts, type, level, message, source, incidentId, acknowledgedBy(Name), acknowledgedAt, feedback, feedbackNote, details` (`details` = `details` của bản tin `warehouse/alert`, vd. `push:false`) |
 | GET | `/api/alerts/{id}` | |
 | POST | `/api/alerts/{id}/ack` | "Đã xem" (dừng leo thang) |
 | POST | `/api/alerts/{id}/feedback` | `{"feedback":"true_alarm\|false_alarm","note"?}` |
@@ -86,6 +86,13 @@ Lỗi luôn có dạng `{"error": "<mã>", "message": "...", "details": {...}}`.
 | `threshold_exceeded_pct` | — | — | Series `temp`, `hum`: % thời gian vượt `tempHigh` / `humHigh` |
 | `device_on_minutes` | — | — / `reason` | Cần `device`; chia chính xác theo bucket |
 | `command_count` | — | — / `source` | `device` tùy chọn |
+| `motion_events` | — | — | Từng lần chuyển động **ngoài giờ** (series `after_hours`, mỗi điểm `v=1`) — biểu đồ chấm |
+| `alert_count` | — | — / `type` / `level` / `source` | |
+| `false_alarm_rate` | — | — | % báo giả trong số cảnh báo đã có phản hồi (series `rate`) |
+| `incident_resolve_minutes` | — | — | `stat`: trung bình `details.duration_min` của cảnh báo `recovered` |
+| `device_online` | — | — | `stat`: % thời gian ESP32 online (series `uptime_pct`, theo `status/online` + heartbeat) |
+| `rssi` | — | — | Trung bình RSSI WiFi |
+| `mq2_baseline` | — | — | Phân vị 10% của MQ2 (bỏ lúc làm nóng) — mức nền, tăng dần = cảm biến trôi |
 
 - `interval`: `5m`, `1h` (mặc định), `1d`, `1w`; tối đa 2000 điểm. Bucket ngày / tuần bắt đầu 00:00 / thứ Hai giờ Việt Nam.
 - Mặc định 24 giờ gần nhất. `dayOfWeek`: 1 = thứ Hai … 7 = Chủ nhật.
@@ -127,6 +134,16 @@ curl -N -X POST localhost:8080/api/chat -H "Authorization: Bearer $TOKEN" -H 'Co
      -d '{"message":"Kho đang thế nào?"}'
 ```
 
+### Push notification — `/api/push` (app mobile, FCM HTTP v1)
+
+| Method | Path | Ghi chú |
+|--------|------|---------|
+| GET | `/api/push/status` | `{"enabled": <đã cấu hình FCM chưa>, "myDevices": <số máy của tôi>}` |
+| POST | `/api/push/tokens` | `{"token": "<FCM token>", "platform": "android"\|"ios"}` → 204. Token đã có thì chuyển sang người đăng nhập hiện tại |
+| DELETE | `/api/push/tokens` | `{"token"}` → 204 (đăng xuất trên máy) |
+
+Mỗi cảnh báo lưu vào `app.alerts` sẽ được **push cho mọi máy đã đăng ký**: `critical` / `warning` luôn gửi, `info` gửi trừ khi `details.push=false`. Data gồm `alertId`, `type`, `level`; Android dùng kênh `alerts-critical` (mức nguy hiểm) hoặc `alerts`. Gửi bằng service account (`FCM_CREDENTIALS_FILE`): tự ký JWT RS256 để lấy access token Google, không cần Firebase Admin SDK. Việc gửi chạy nền, nên FCM lỗi không ảnh hưởng việc lưu cảnh báo. Token hết hiệu lực (`UNREGISTERED`) bị xóa tự động.
+
 ### Realtime — WebSocket
 
 `ws://<host>:8080/ws/live?token=<accessToken>` (sai / thiếu token → 401).
@@ -138,4 +155,4 @@ Token hết hạn không tự ngắt WebSocket đang mở; client nên kết n�
 
 ## Database (schema `app`)
 
-`users`, `refresh_tokens` (SHA-256), `mq2_readings`, `climate_readings`, `motion_events`, `safety_events` (chỉ ghi khi đổi), `device_states` (chỉ ghi khi đổi), `device_health`, `device_config` (1 dòng), `device_command_logs`, `alerts`. Bản tin retained gửi lại khi kết nối lại broker không tạo dòng trùng.
+`users`, `refresh_tokens` (SHA-256), `push_tokens` (FCM), `mq2_readings`, `climate_readings`, `motion_events`, `safety_events` (chỉ ghi khi đổi), `device_states` (chỉ ghi khi đổi), `device_health`, `device_config` (1 dòng), `device_command_logs`, `alerts`. Bản tin retained gửi lại khi kết nối lại broker không tạo dòng trùng.

@@ -12,19 +12,24 @@ import java.util.Optional;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
+
 @Repository
 public class AlertRepository {
 
     private static final String COLUMNS = """
             a.id, a.ts, a.type, a.level, a.message, a.source, a.incident_id,
             a.acknowledged_by, ua.username AS acknowledged_by_name, a.acknowledged_at,
-            a.feedback, a.feedback_note, a.feedback_by""";
+            a.feedback, a.feedback_note, a.feedback_by, (a.payload->'details')::text AS details_json""";
     private static final String FROM = " FROM app.alerts a LEFT JOIN app.users ua ON ua.id = a.acknowledged_by";
 
     private final JdbcClient jdbc;
+    private final ObjectMapper mapper;
 
-    public AlertRepository(JdbcClient jdbc) {
+    public AlertRepository(JdbcClient jdbc, ObjectMapper mapper) {
         this.jdbc = jdbc;
+        this.mapper = mapper;
     }
 
     public long insert(String type, String level, String message, String source, String incidentId,
@@ -36,7 +41,7 @@ public class AlertRepository {
     }
 
     public Optional<Map<String, Object>> find(long id) {
-        return jdbc.sql("SELECT " + COLUMNS + FROM + " WHERE a.id = ?").params(id).query(AlertRepository::row)
+        return jdbc.sql("SELECT " + COLUMNS + FROM + " WHERE a.id = ?").params(id).query(this::row)
                 .optional();
     }
 
@@ -53,7 +58,7 @@ public class AlertRepository {
         sql.append(" ORDER BY a.ts DESC, a.id DESC LIMIT ? OFFSET ?");
         params.add(limit);
         params.add(offset);
-        return jdbc.sql(sql.toString()).params(params).query(AlertRepository::row).list();
+        return jdbc.sql(sql.toString()).params(params).query(this::row).list();
     }
 
     public int acknowledge(long id, long userId) {
@@ -67,7 +72,7 @@ public class AlertRepository {
                 .params(feedback, note, userId, id).update();
     }
 
-    private static Map<String, Object> row(ResultSet rs, int i) throws SQLException {
+    private Map<String, Object> row(ResultSet rs, int i) throws SQLException {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", rs.getLong("id"));
         m.put("ts", rs.getObject("ts", OffsetDateTime.class).toInstant());
@@ -83,6 +88,25 @@ public class AlertRepository {
         m.put("feedback", rs.getString("feedback"));
         m.put("feedbackNote", rs.getString("feedback_note"));
         m.put("feedbackBy", rs.getObject("feedback_by"));
+        m.put("details", details(rs.getString("details_json")));
         return m;
+    }
+
+    /** payload.details của bản tin warehouse/alert (vd. {"temp":41,"push":false}); thiếu / lỗi -> {}. */
+    private Map<String, Object> details(String json) {
+        if (json == null || json.isBlank()) {
+            return Map.of();
+        }
+        try {
+            Object v = mapper.readValue(json, Object.class);
+            if (v instanceof Map<?, ?> map) {
+                Map<String, Object> out = new LinkedHashMap<>();
+                map.forEach((k, val) -> out.put(String.valueOf(k), val));
+                return out;
+            }
+        } catch (JacksonException e) {
+            // bỏ qua
+        }
+        return Map.of();
     }
 }

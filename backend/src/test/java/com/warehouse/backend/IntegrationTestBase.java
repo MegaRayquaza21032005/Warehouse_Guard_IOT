@@ -62,7 +62,7 @@ public abstract class IntegrationTestBase {
         jdbc.sql("""
                 TRUNCATE app.users, app.refresh_tokens, app.mq2_readings, app.climate_readings, app.motion_events,
                          app.safety_events, app.device_states, app.device_health, app.device_config,
-                         app.device_command_logs, app.alerts RESTART IDENTITY CASCADE""").update();
+                         app.device_command_logs, app.alerts, app.push_tokens RESTART IDENTITY CASCADE""").update();
     }
 
     protected String json(Object o) {

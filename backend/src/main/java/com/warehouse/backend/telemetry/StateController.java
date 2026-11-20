@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.warehouse.backend.common.ApiException;
 import com.warehouse.backend.common.Rows;
 import com.warehouse.backend.common.TimeRange;
+import com.warehouse.backend.config.AppProperties;
 import com.warehouse.backend.mqtt.MqttPublisher;
 import com.warehouse.backend.mqtt.Topics;
 
@@ -35,11 +36,13 @@ public class StateController {
     private final LiveStateService live;
     private final MqttPublisher mqtt;
     private final JdbcClient jdbc;
+    private final AppProperties props;
 
-    public StateController(LiveStateService live, MqttPublisher mqtt, JdbcClient jdbc) {
+    public StateController(LiveStateService live, MqttPublisher mqtt, JdbcClient jdbc, AppProperties props) {
         this.live = live;
         this.mqtt = mqtt;
         this.jdbc = jdbc;
+        this.props = props;
     }
 
     /** Trạng thái hiện tại: cảm biến, an toàn, thiết bị, online, cấu hình. */
@@ -47,6 +50,9 @@ public class StateController {
     public Map<String, Object> state() {
         Map<String, Object> s = live.snapshot();
         s.put("brokerConnected", mqtt.isConnected());
+        AppProperties.WorkHours wh = props.workHours();
+        s.put("workHours", Map.of("start", wh.start(), "end", wh.end(), "days", wh.days(),
+                "timezone", props.timezone()));
         return s;
     }
 

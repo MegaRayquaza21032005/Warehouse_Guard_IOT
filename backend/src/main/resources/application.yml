@@ -54,6 +54,9 @@ app:
   agent:
     url: ${AGENT_URL:http://localhost:${AGENT_PORT:8000}}
     timeout: 60s
+  push:
+    credentials-file: ${FCM_CREDENTIALS_FILE:}
+    fcm-url: https://fcm.googleapis.com
   mqtt:
     enabled: true
     host: ${MQTT_HOST:localhost}

@@ -60,8 +60,9 @@ public class StatsService {
             "hum", new String[] { "app.climate_readings", "hum", "hum IS NOT NULL" },
             "mq2", new String[] { "app.mq2_readings", "raw", "NOT warming_up" });
 
-    public static final List<String> METRICS = List.of("temp", "hum", "mq2", "motion_count",
-            "threshold_exceeded_pct", "device_on_minutes", "command_count");
+    public static final List<String> METRICS = List.of("temp", "hum", "mq2", "motion_count", "motion_events",
+            "threshold_exceeded_pct", "device_on_minutes", "command_count", "alert_count", "false_alarm_rate",
+            "incident_resolve_minutes", "device_online", "rssi", "mq2_baseline");
 
     private static final String BUCKET = "date_bin(CAST(:step AS interval), ts, CAST(:origin AS timestamptz))";
 
@@ -98,6 +99,14 @@ public class StatsService {
             case "threshold_exceeded_pct" -> thresholdPct(p, groupBy, iv);
             case "device_on_minutes" -> deviceOnMinutes(p, groupBy, device, iv);
             case "command_count" -> commandCount(p, groupBy, device, iv);
+            case "motion_events" -> motionEvents(p, iv);
+            case "alert_count" -> alertCount(p, groupBy, iv);
+            case "false_alarm_rate" -> falseAlarmRate(p, iv);
+            case "incident_resolve_minutes" -> incidentResolve(p, iv);
+            case "device_online" -> deviceOnline(p, iv);
+            case "rssi" -> simple("rssi", "avg(rssi)", "app.device_health", "rssi IS NOT NULL", p, iv);
+            case "mq2_baseline" -> simple("mq2_baseline", "percentile_cont(0.1) WITHIN GROUP (ORDER BY raw)",
+                    "app.mq2_readings", "NOT warming_up", p, iv);
             default -> throw new IllegalStateException(metric);
         };
     }
@@ -228,6 +237,85 @@ public class StatsService {
             spec = spec.param("device", device);
         }
         return new StatsResponse("command_count", iv, p.r.from(), p.r.to(), groupBy, grouped(spec), List.of());
+    }
+
+    // ---------------- Chuyển động ngoài giờ (từng lần, dạng chấm) ----------------
+    private StatsResponse motionEvents(Params p, String iv) {
+        AppProperties.WorkHours wh = props.workHours();
+        String days = wh.days().stream().map(String::valueOf).collect(Collectors.joining(",", "{", "}"));
+        String sql = "SELECT ts AS bucket, 1.0::float8 AS v FROM app.motion_events WHERE motion"
+                + " AND ts >= :from AND ts < :to AND NOT (extract(isodow FROM ts AT TIME ZONE :tz)::int"
+                + " = ANY(CAST(:days AS int[])) AND (ts AT TIME ZONE :tz)::time >= CAST(:wstart AS time)"
+                + " AND (ts AT TIME ZONE :tz)::time < CAST(:wend AS time)) ORDER BY ts LIMIT " + MAX_BUCKETS;
+        List<Point> pts = new ArrayList<>();
+        jdbc.sql(sql).param("from", Rows.utc(p.r.from())).param("to", Rows.utc(p.r.to()))
+                .param("tz", props.timezone()).param("days", days)
+                .param("wstart", wh.startTime().toString()).param("wend", wh.endTime().toString())
+                .query((ResultSet rs) -> {
+                    pts.add(new Point(bucket(rs), 1.0));
+                });
+        return new StatsResponse("motion_events", iv, p.r.from(), p.r.to(), null,
+                List.of(new Series("after_hours", pts)), List.of());
+    }
+
+    // ---------------- Cảnh báo ----------------
+    private StatsResponse alertCount(Params p, String groupBy, String iv) {
+        if (groupBy != null && !List.of("type", "level", "source").contains(groupBy)) {
+            throw ApiException.badRequest("invalid_group_by", "alert_count hỗ trợ group_by: type, level, source");
+        }
+        String grp = groupBy == null ? "'count'" : groupBy; // chỉ là tên cột cố định đã kiểm tra ở trên
+        String sql = "SELECT " + BUCKET + " AS bucket, " + grp + " AS grp, count(*)::float8 AS v"
+                + " FROM app.alerts WHERE ts >= :from AND ts < :to GROUP BY 1, 2 ORDER BY 1";
+        return new StatsResponse("alert_count", iv, p.r.from(), p.r.to(), groupBy, grouped(p.bind(jdbc.sql(sql))),
+                List.of());
+    }
+
+    /** % cảnh báo bị đánh dấu báo giả trong số cảnh báo đã có phản hồi. */
+    private StatsResponse falseAlarmRate(Params p, String iv) {
+        String sql = "SELECT " + BUCKET + " AS bucket, 'rate' AS grp,"
+                + " (100.0 * avg(CASE WHEN feedback = 'false_alarm' THEN 1 ELSE 0 END))::float8 AS v"
+                + " FROM app.alerts WHERE ts >= :from AND ts < :to AND feedback IS NOT NULL GROUP BY 1 ORDER BY 1";
+        return new StatsResponse("false_alarm_rate", iv, p.r.from(), p.r.to(), null, grouped(p.bind(jdbc.sql(sql))),
+                List.of());
+    }
+
+    /** Thời gian xử lý sự cố trung bình (phút) — từ cảnh báo "recovered" (details.duration_min). */
+    private StatsResponse incidentResolve(Params p, String iv) {
+        String sql = "SELECT avg((payload->'details'->>'duration_min')::float8)::float8 AS v FROM app.alerts"
+                + " WHERE type = 'recovered' AND ts >= :from AND ts < :to"
+                + " AND jsonb_typeof(payload->'details'->'duration_min') = 'number'";
+        Double v = p.bind(jdbc.sql(sql)).query((rs, i) -> dbl(rs, "v")).optional().orElse(null);
+        return stat("incident_resolve_minutes", "avg", v, p, iv);
+    }
+
+    /** % thời gian ESP32 trực tuyến (theo status/online, kể cả trạng thái từ trước khoảng thời gian). */
+    private StatsResponse deviceOnline(Params p, String iv) {
+        String sql = """
+                WITH s AS (
+                    SELECT ts, lead(ts) OVER (ORDER BY ts, id) AS next_ts, online
+                    FROM app.device_health WHERE online IS NOT NULL AND ts < :to
+                ), iv AS (
+                    SELECT greatest(ts, CAST(:from AS timestamptz)) AS s,
+                           least(coalesce(next_ts, now()), CAST(:to AS timestamptz)) AS e, online
+                    FROM s WHERE coalesce(next_ts, now()) > CAST(:from AS timestamptz)
+                )
+                SELECT (100.0 * sum(CASE WHEN online THEN extract(epoch FROM e - s) ELSE 0 END)
+                        / nullif(sum(extract(epoch FROM e - s)), 0))::float8 AS v
+                FROM iv WHERE e > s""";
+        Double v = p.bind(jdbc.sql(sql)).query((rs, i) -> dbl(rs, "v")).optional().orElse(null);
+        return stat("device_online", "uptime_pct", v, p, iv);
+    }
+
+    /** Một chuỗi số theo bucket: biểu thức tổng hợp cố định trên một bảng cố định. */
+    private StatsResponse simple(String metric, String aggExpr, String table, String where, Params p, String iv) {
+        String sql = "SELECT " + BUCKET + " AS bucket, 'avg' AS grp, (" + aggExpr + ")::float8 AS v FROM " + table
+                + " WHERE ts >= :from AND ts < :to AND " + where + " GROUP BY 1 ORDER BY 1";
+        return new StatsResponse(metric, iv, p.r.from(), p.r.to(), null, grouped(p.bind(jdbc.sql(sql))), List.of());
+    }
+
+    private static StatsResponse stat(String metric, String name, Double v, Params p, String iv) {
+        List<Point> pts = v == null ? List.of() : List.of(new Point(p.r.to(), v));
+        return new StatsResponse(metric, iv, p.r.from(), p.r.to(), null, List.of(new Series(name, pts)), List.of());
     }
 
     // ---------------- Dòng thời gian bật/tắt ----------------

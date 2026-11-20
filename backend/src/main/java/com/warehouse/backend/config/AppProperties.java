@@ -16,7 +16,8 @@ public record AppProperties(
         List<String> corsAllowedOrigins,
         WorkHours workHours,
         Mqtt mqtt,
-        Agent agent) {
+        Agent agent,
+        Push push) {
 
     public ZoneId zone() {
         return ZoneId.of(timezone);
@@ -38,6 +39,16 @@ public record AppProperties(
 
     /** AI Agent nội bộ (FastAPI, không public). url vd. http://localhost:8000. */
     public record Agent(String url, Duration timeout) {
+    }
+
+    /**
+     * Push FCM (HTTP v1). credentialsFile = file JSON service account của Firebase; trống -> tắt push.
+     * fcmUrl chỉ đổi khi test.
+     */
+    public record Push(String credentialsFile, String fcmUrl) {
+        public boolean enabled() {
+            return credentialsFile != null && !credentialsFile.isBlank();
+        }
     }
 
     public record Mqtt(boolean enabled, String host, int port, String username, String password, String clientId) {

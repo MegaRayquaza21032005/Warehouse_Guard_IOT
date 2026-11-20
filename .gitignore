@@ -2,6 +2,10 @@
 .env
 firmware/**/secrets.h
 mqtt-broker/config/passwd
+secrets/
+*firebase-adminsdk*.json
+google-services.json
+GoogleService-Info.plist
 
 # ===== Dữ liệu runtime =====
 mqtt-broker/data/*
