@@ -19,8 +19,8 @@ enum MqLevel : uint8_t { MQ_NORMAL = 0, MQ_WARNING = 1, MQ_DANGER = 2 };
 enum SafetyState : uint8_t { SAFE_NORMAL = 0, SAFE_GAS = 1, SAFE_GAS_DANGER = 2, SAFE_FIRE = 3 };
 
 enum Fault : uint8_t {
-  FAULT_MQ2_DISCONNECTED = 1 << 0,
-  FAULT_MQ2_SATURATED    = 1 << 1,
+  FAULT_MQ135_DISCONNECTED = 1 << 0,
+  FAULT_MQ135_SATURATED    = 1 << 1,
   FAULT_DHT_FAILED       = 1 << 2,
 };
 
@@ -38,8 +38,8 @@ inline const char* safetyStr(SafetyState s) {
 
 // Cấu hình chỉnh được qua MQTT (lưu flash)
 struct Config {
-  int32_t  mq2Warning        = DEF_MQ2_WARNING;
-  int32_t  mq2Danger         = DEF_MQ2_DANGER;
+  int32_t  mq135Warning        = DEF_MQ135_WARNING;
+  int32_t  mq135Danger         = DEF_MQ135_DANGER;
   float    tempHigh          = DEF_TEMP_HIGH;
   float    humHigh           = DEF_HUM_HIGH;
   float    tempRiseC         = DEF_TEMP_RISE_C;
@@ -54,8 +54,8 @@ struct Config {
 
 // Trả về nullptr nếu hợp lệ, ngược lại là mã lỗi
 inline const char* validateConfig(const Config& c) {
-  if (c.mq2Warning < MQ2_HYSTERESIS_RAW || c.mq2Danger > 4095 ||
-      c.mq2Danger <= c.mq2Warning + MQ2_HYSTERESIS_RAW)        return "invalid_mq2_threshold";
+  if (c.mq135Warning < MQ135_HYSTERESIS_RAW || c.mq135Danger > 4095 ||
+      c.mq135Danger <= c.mq135Warning + MQ135_HYSTERESIS_RAW)        return "invalid_mq135_threshold";
   if (c.tempHigh < 0 || c.tempHigh > 80)                       return "invalid_temp_high";
   if (c.humHigh < 10 || c.humHigh > 100)                       return "invalid_hum_high";
   if (c.tempRiseC < 0.5f || c.tempRiseC > 20)                  return "invalid_temp_rise";
@@ -77,15 +77,15 @@ inline bool hystHigh(bool cur, float v, float threshold, float hyst) {
 }
 
 inline MqLevel evalMq(int raw, MqLevel cur, const Config& c) {
-  const int warnOff   = c.mq2Warning - MQ2_HYSTERESIS_RAW;
-  const int dangerOff = c.mq2Danger  - MQ2_HYSTERESIS_RAW;
+  const int warnOff   = c.mq135Warning - MQ135_HYSTERESIS_RAW;
+  const int dangerOff = c.mq135Danger  - MQ135_HYSTERESIS_RAW;
   switch (cur) {
     case MQ_NORMAL:
-      if (raw >= c.mq2Danger)  return MQ_DANGER;
-      if (raw >= c.mq2Warning) return MQ_WARNING;
+      if (raw >= c.mq135Danger)  return MQ_DANGER;
+      if (raw >= c.mq135Warning) return MQ_WARNING;
       return MQ_NORMAL;
     case MQ_WARNING:
-      if (raw >= c.mq2Danger) return MQ_DANGER;
+      if (raw >= c.mq135Danger) return MQ_DANGER;
       if (raw < warnOff)      return MQ_NORMAL;
       return MQ_WARNING;
     case MQ_DANGER:

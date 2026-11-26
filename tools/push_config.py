@@ -22,8 +22,8 @@ TIMEOUT_S = 5
 # Khóa JSON trong cmd/config (CLAUDE.md mục 4) -> (biến .env, kiểu)
 # Biến nào để trống / không có trong .env thì không gửi (ESP32 giữ giá trị cũ).
 FIRMWARE_KEYS = {
-    "mq2Warning":        ("MQ2_WARNING", int),
-    "mq2Danger":         ("MQ2_DANGER", int),
+    "mq135Warning":        ("MQ135_WARNING", int),
+    "mq135Danger":         ("MQ135_DANGER", int),
     "tempHigh":          ("TEMP_HIGH", float),
     "humHigh":           ("HUM_HIGH", float),
     "tempRiseC":         ("TEMP_RISE_C", float),

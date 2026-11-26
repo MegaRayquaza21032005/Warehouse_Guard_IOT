@@ -52,7 +52,7 @@ export default function Layout() {
   const criticals = unacked.filter((a) => a.level === 'critical' && a.source === 'rule')
   const online = snap.live.online?.data.status === 'online'
   const health = snap.live.device?.data
-  const lastData = snap.live.sensors.mq2?.updatedAt ?? snap.live.sensors.dht11?.updatedAt
+  const lastData = snap.live.sensors.mq135?.updatedAt ?? snap.live.sensors.dht11?.updatedAt
   useNow(15_000)
 
   useEffect(() => setOpen(false), [loc.pathname])
@@ -119,7 +119,7 @@ export default function Layout() {
           <Outlet />
         </main>
         <p className="footer-note">
-          Hệ thống dùng cảm biến phổ thông (MQ2, DHT11) — không thay thế hệ thống báo cháy đạt chuẩn.
+          Hệ thống dùng cảm biến phổ thông (MQ135, DHT11) — không thay thế hệ thống báo cháy đạt chuẩn.
         </p>
       </div>
       <Toasts />

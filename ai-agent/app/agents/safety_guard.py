@@ -16,8 +16,8 @@ CLIMATE_STALE_S = 120       # số liệu nhiệt/ẩm cũ hơn -> coi như khô
 
 # Giống firmware (logic.h validateConfig) và Java BE (ConfigService): khóa -> (min, max, số nguyên?)
 CONFIG_RULES: dict[str, tuple[float, float, bool]] = {
-    "mq2Warning": (150, 4095, True),
-    "mq2Danger": (150, 4095, True),
+    "mq135Warning": (150, 4095, True),
+    "mq135Danger": (150, 4095, True),
     "tempHigh": (0, 80, False),
     "humHigh": (10, 100, False),
     "tempRiseC": (0.5, 20, False),
@@ -30,7 +30,7 @@ CONFIG_RULES: dict[str, tuple[float, float, bool]] = {
     "humFanMinDrop": (0.5, 50, False),
 }
 CONFIG_DEFAULTS: dict[str, float] = {
-    "mq2Warning": 1500, "mq2Danger": 2500, "tempHigh": 38, "humHigh": 80, "tempRiseC": 3, "tempRiseWindowMin": 5,
+    "mq135Warning": 1500, "mq135Danger": 2500, "tempHigh": 38, "humHigh": 80, "tempRiseC": 3, "tempRiseWindowMin": 5,
     "mistFireMaxMin": 10, "mistCoolMaxMin": 5, "mistCooldownMin": 15, "mistHumMax": 70, "humFanCheckMin": 30,
     "humFanMinDrop": 3,
 }
@@ -136,8 +136,8 @@ def check_config(patch: dict[str, Any], current: dict[str, Any]) -> tuple[Verdic
         if not lo <= v <= hi:
             return Verdict.block(f"{k} phải trong khoảng {lo:g} – {hi:g}"), {}
         merged[k] = int(round(v)) if integer else float(v)
-    if merged["mq2Danger"] <= merged["mq2Warning"] + 150:
-        return Verdict.block("mq2Danger phải lớn hơn mq2Warning + 150"), {}
+    if merged["mq135Danger"] <= merged["mq135Warning"] + 150:
+        return Verdict.block("mq135Danger phải lớn hơn mq135Warning + 150"), {}
     if merged["mistHumMax"] >= merged["humHigh"]:
         return Verdict.block("mistHumMax phải nhỏ hơn humHigh"), {}
     return Verdict.ok(), merged

@@ -278,8 +278,8 @@ class NoArgs(BaseModel):
 
 
 class SensorHistoryArgs(BaseModel):
-    kind: Literal["mq2", "climate", "motion", "safety", "health", "device-states"] = Field(
-        description="mq2 = khói/gas; climate = nhiệt độ + độ ẩm; motion = chuyển động; safety = trạng thái an toàn; "
+    kind: Literal["mq135", "climate", "motion", "safety", "health", "device-states"] = Field(
+        description="mq135 = khói / khí; climate = nhiệt độ + độ ẩm; motion = chuyển động; safety = trạng thái an toàn; "
                     "health = online/wifi; device-states = trạng thái quạt/phun sương/đèn")
     from_time: str | None = Field(None, description="ISO-8601, vd. 2026-11-20T08:00:00+07:00. Mặc định 1 giờ trước")
     to_time: str | None = Field(None, description="ISO-8601. Mặc định bây giờ")
@@ -301,13 +301,13 @@ class AlertHistoryArgs(BaseModel):
 
 
 class StatsArgs(BaseModel):
-    metric: Literal["temp", "hum", "mq2", "motion_count", "threshold_exceeded_pct", "device_on_minutes",
+    metric: Literal["temp", "hum", "mq135", "motion_count", "threshold_exceeded_pct", "device_on_minutes",
                     "command_count", "device_state"] = Field(
         description="device_state = lịch sử bật/tắt (timeline, cần device)")
     from_time: str = Field(description="ISO-8601 có múi giờ, vd. 2026-11-19T00:00:00+07:00")
     to_time: str = Field(description="ISO-8601 có múi giờ")
     interval: Literal["5m", "1h", "1d", "1w"] = "1h"
-    agg: str = Field("avg,min,max", description="avg,min,max,sum,count (cho temp/hum/mq2)")
+    agg: str = Field("avg,min,max", description="avg,min,max,sum,count (cho temp/hum/mq135)")
     group_by: str | None = Field(None, description="work_hours | reason | source | hour_of_day,day_of_week")
     device: Literal["fan", "mist", "light"] | None = Field(None, description="Bắt buộc với device_on_minutes, "
                                                                              "device_state")
@@ -325,8 +325,8 @@ class DeviceCmdArgs(BaseModel):
 
 
 class ThresholdArgs(BaseModel):
-    mq2Warning: int | None = Field(None, description="Ngưỡng cảnh báo MQ2 (ADC 150–4095)")
-    mq2Danger: int | None = Field(None, description="Ngưỡng nguy hiểm MQ2 (> mq2Warning + 150)")
+    mq135Warning: int | None = Field(None, description="Ngưỡng cảnh báo MQ135 (ADC 150–4095)")
+    mq135Danger: int | None = Field(None, description="Ngưỡng nguy hiểm MQ135 (> mq135Warning + 150)")
     tempHigh: float | None = Field(None, description="Nhiệt độ cao (°C)")
     humHigh: float | None = Field(None, description="Độ ẩm cao (%)")
     tempRiseC: float | None = Field(None, description="Mức tăng nhiệt nghi cháy (°C)")
@@ -434,7 +434,7 @@ def build_monitor_tools(s: Services, ctx: RunContext) -> list[StructuredTool]:
             return {"query": query, "chart": "timeline", "segments": len(segs), "on_minutes": round(on_min, 1),
                     "segments_sample": segs[:15]}
         query.update(interval=interval)
-        if metric in ("temp", "hum", "mq2"):
+        if metric in ("temp", "hum", "mq135"):
             query["agg"] = [a.strip() for a in agg.split(",") if a.strip()]
         if group_by:
             query["group_by"] = group_by

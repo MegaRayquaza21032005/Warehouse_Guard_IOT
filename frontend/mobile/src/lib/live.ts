@@ -10,7 +10,7 @@ export interface BufferPoint {
   t: number
   temp: number | null
   hum: number | null
-  mq2: number | null
+  mq135: number | null
 }
 
 export type ConnState = 'connecting' | 'open' | 'closed'
@@ -42,7 +42,7 @@ const EMPTY_LIVE: LiveState = {
   online: null,
   device: null,
   safety: null,
-  sensors: { mq2: null, dht11: null, pir: null },
+  sensors: { mq135: null, dht11: null, pir: null },
   devices: { fan: null, mist: null, light: null },
   config: null,
 }
@@ -103,8 +103,8 @@ function mergeLive(type: string, data: unknown, ts: string): LiveState {
   const st = <T>(d: unknown): Stamped<T> => ({ data: d as T, updatedAt: ts })
   const l = snap.live
   switch (type) {
-    case 'sensor.mq2':
-      return { ...l, sensors: { ...l.sensors, mq2: st(data) } }
+    case 'sensor.mq135':
+      return { ...l, sensors: { ...l.sensors, mq135: st(data) } }
     case 'sensor.dht11':
       return { ...l, sensors: { ...l.sensors, dht11: st(data) } }
     case 'sensor.pir':
@@ -134,7 +134,7 @@ function pushBuffer(p: Partial<BufferPoint>, t: number) {
     t,
     temp: p.temp !== undefined ? p.temp : (last?.temp ?? null),
     hum: p.hum !== undefined ? p.hum : (last?.hum ?? null),
-    mq2: p.mq2 !== undefined ? p.mq2 : (last?.mq2 ?? null),
+    mq135: p.mq135 !== undefined ? p.mq135 : (last?.mq135 ?? null),
   }
   const cut = t - BUFFER_MS
   return [...snap.buffer.filter((x) => x.t >= cut), point]
@@ -161,7 +161,7 @@ function onMessage(msg: { type: string; data: unknown; ts?: string }) {
     if (/^status\.(fan|mist|light)$/.test(msg.type) && ack?.trace_id && ack.result) {
       patch.acks = { ...snap.acks, [msg.type.slice(7)]: { trace_id: ack.trace_id, result: ack.result } }
     }
-    if (msg.type === 'sensor.mq2' && typeof d.raw === 'number' && !d.warmingUp) patch.buffer = pushBuffer({ mq2: d.raw }, t)
+    if (msg.type === 'sensor.mq135' && typeof d.raw === 'number' && !d.warmingUp) patch.buffer = pushBuffer({ mq135: d.raw }, t)
     if (msg.type === 'sensor.dht11' && typeof d.temp === 'number') patch.buffer = pushBuffer({ temp: d.temp, hum: (d.hum as number) ?? null }, t)
     set(patch)
   }
@@ -176,21 +176,21 @@ async function loadBuffer() {
   const from = new Date(Date.now() - BUFFER_MS).toISOString()
   const [cl, mq] = await Promise.all([
     readings.climate(from).catch(() => [] as Awaited<ReturnType<typeof readings.climate>>),
-    readings.mq2(from).catch(() => [] as Awaited<ReturnType<typeof readings.mq2>>),
+    readings.mq135(from).catch(() => [] as Awaited<ReturnType<typeof readings.mq135>>),
   ])
   const pts: BufferPoint[] = []
-  for (const c of cl) if (c.temp !== null) pts.push({ t: new Date(c.ts).getTime(), temp: c.temp, hum: c.hum, mq2: null })
-  for (const m of mq) if (!m.warmingUp) pts.push({ t: new Date(m.ts).getTime(), temp: null, hum: null, mq2: m.raw })
+  for (const c of cl) if (c.temp !== null) pts.push({ t: new Date(c.ts).getTime(), temp: c.temp, hum: c.hum, mq135: null })
+  for (const m of mq) if (!m.warmingUp) pts.push({ t: new Date(m.ts).getTime(), temp: null, hum: null, mq135: m.raw })
   pts.sort((a, b) => a.t - b.t)
   // điền giá trị gần nhất để hai chuỗi vẽ liền
   let temp: number | null = null
   let hum: number | null = null
-  let mq2: number | null = null
+  let mq135: number | null = null
   const merged = pts.map((p) => {
     temp = p.temp ?? temp
     hum = p.hum ?? hum
-    mq2 = p.mq2 ?? mq2
-    return { t: p.t, temp, hum, mq2 }
+    mq135 = p.mq135 ?? mq135
+    return { t: p.t, temp, hum, mq135 }
   })
   set({ buffer: [...merged, ...snap.buffer.filter((p) => p.t > (merged.at(-1)?.t ?? 0))] })
 }

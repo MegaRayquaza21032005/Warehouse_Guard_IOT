@@ -120,10 +120,10 @@ class DeviceIntegrationTest extends IntegrationTestBase {
     void configIsValidatedMergedAndPublishedRetained() throws Exception {
         String auth = "Bearer " + registerAndGetToken("thanh");
         mvc.perform(get("/api/config").header("Authorization", auth))
-                .andExpect(jsonPath("$.mq2Warning").value(1500)).andExpect(jsonPath("$.humHigh").value(80));
+                .andExpect(jsonPath("$.mq135Warning").value(1500)).andExpect(jsonPath("$.humHigh").value(80));
         mvc.perform(put("/api/config").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
-                .content(json(Map.of("mq2Warning", 2400)))).andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("invalid_mq2_threshold"));
+                .content(json(Map.of("mq135Warning", 2400)))).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_mq135_threshold"));
         mvc.perform(put("/api/config").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
                 .content(json(Map.of("mistHumMax", 85)))).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("invalid_mist_hum_max"));
@@ -135,16 +135,16 @@ class DeviceIntegrationTest extends IntegrationTestBase {
         verify(mqtt, never()).publish(anyString(), any(), anyBoolean());
 
         mvc.perform(put("/api/config").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
-                .content(json(Map.of("mq2Warning", 1700)))).andExpect(status().isAccepted());
+                .content(json(Map.of("mq135Warning", 1700)))).andExpect(status().isAccepted());
         ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
         verify(mqtt).publish(eq("warehouse/cmd/config"), payload.capture(), eq(true));
         Map<String, Object> sent = (Map<String, Object>) payload.getValue();
-        assertThat(sent).containsEntry("mq2Warning", 1700L).containsKey("humFanMinDrop").hasSize(12);
+        assertThat(sent).containsEntry("mq135Warning", 1700L).containsKey("humFanMinDrop").hasSize(12);
 
         // ESP32 xác nhận -> lưu DB, GET trả giá trị mới
         mqttIn("warehouse/status/config", sent);
-        mvc.perform(get("/api/config").header("Authorization", auth)).andExpect(jsonPath("$.mq2Warning").value(1700));
-        assertThat(jdbc.sql("SELECT payload->>'mq2Warning' FROM app.device_config").query(String.class).single())
+        mvc.perform(get("/api/config").header("Authorization", auth)).andExpect(jsonPath("$.mq135Warning").value(1700));
+        assertThat(jdbc.sql("SELECT payload->>'mq135Warning' FROM app.device_config").query(String.class).single())
                 .isEqualTo("1700");
     }
 

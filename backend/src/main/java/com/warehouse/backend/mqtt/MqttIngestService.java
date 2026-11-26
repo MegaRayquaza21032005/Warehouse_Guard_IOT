@@ -82,7 +82,7 @@ public class MqttIngestService {
         Object broadcastData = data;
 
         switch (topic) {
-            case Topics.SENSOR_MQ2 -> onMq2(data);
+            case Topics.SENSOR_MQ135 -> onMq135(data);
             case Topics.SENSOR_DHT -> onDht(data);
             case Topics.SENSOR_PIR -> onPir(data);
             case Topics.STATUS_SAFETY -> onSafety(data);
@@ -111,13 +111,13 @@ public class MqttIngestService {
     }
 
     // ---------------- Cảm biến ----------------
-    private void onMq2(Map<String, Object> d) {
+    private void onMq135(Map<String, Object> d) {
         Integer raw = intVal(d, "raw");
         if (raw == null) {
             return;
         }
         String level = Optional.ofNullable(str(d, "level")).orElse("normal");
-        telemetry.insertMq2(raw, intVal(d, "mv"), level, Boolean.TRUE.equals(bool(d, "warmingUp")));
+        telemetry.insertMq135(raw, intVal(d, "mv"), level, Boolean.TRUE.equals(bool(d, "warmingUp")));
     }
 
     private void onDht(Map<String, Object> d) {
@@ -142,7 +142,7 @@ public class MqttIngestService {
                 .map(last -> !last.state().equals(state) || !sameJson(last.faultsJson(), faults))
                 .orElse(true);
         if (changed) {
-            telemetry.insertSafety(state, str(d, "mq2Level"), dbl(d, "tempRise"), faults);
+            telemetry.insertSafety(state, str(d, "mq135Level"), dbl(d, "tempRise"), faults);
         }
     }
 

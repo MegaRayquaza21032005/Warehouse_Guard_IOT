@@ -18,7 +18,7 @@ import { getStats, getTimeline } from '../../api'
 import { useCssVars } from '../../lib/hooks'
 import { DEVICE_LABEL, SOURCE_LABEL, WEEKDAY_SHORT, alertTypeLabel, fmtDateTime, fmtDay, fmtTime, reasonLabel } from '../../lib/labels'
 
-const VARS = ['s1', 's2', 's3', 's4', 's5', 's6', 's7', 's8', 'c-temp', 'c-hum', 'c-mq2', 'grid', 'text-3', 'text-2', 'surface', 'ok', 'warn', 'crit', 'border-strong'] as const
+const VARS = ['s1', 's2', 's3', 's4', 's5', 's6', 's7', 's8', 'c-temp', 'c-hum', 'c-mq135', 'grid', 'text-3', 'text-2', 'surface', 'ok', 'warn', 'crit', 'border-strong'] as const
 export const SERIES = ['s1', 's2', 's3', 's4', 's5', 's6', 's7', 's8'] as const
 
 export function useChartColors() {
@@ -197,15 +197,15 @@ export function ClimateStack({
   )
 }
 
-export function Mq2Chart({ rows, warning, danger, height = 200 }: { rows: TimeRow[]; warning: number; danger: number; height?: number }) {
+export function Mq135Chart({ rows, warning, danger, height = 200 }: { rows: TimeRow[]; warning: number; danger: number; height?: number }) {
   const c = useChartColors()
   return (
     <TimeLine
       rows={rows}
-      color={c['c-mq2']}
-      bandColor={c['c-mq2'] + '30'}
+      color={c['c-mq135']}
+      bandColor={c['c-mq135'] + '30'}
       unit=""
-      name="MQ2"
+      name="MQ135"
       height={height}
       domain={[0, Math.max(danger + 600, ...rows.map((r) => r.range?.[1] ?? r.v ?? 0))]}
       zones={[
@@ -501,10 +501,10 @@ export function ChartBlockView({ block, height = 200 }: { block: ChartBlock; hei
   switch (block.chart) {
     case 'line': {
       const rows = statsToRows(stats)
-      if (q.metric === 'mq2') {
+      if (q.metric === 'mq135') {
         const w = block.thresholds?.[0]?.value ?? 1500
         const d = block.thresholds?.[1]?.value ?? 2500
-        return <Mq2Chart rows={rows} warning={w} danger={d} height={height} />
+        return <Mq135Chart rows={rows} warning={w} danger={d} height={height} />
       }
       const color = q.metric === 'hum' ? c['c-hum'] : q.metric === 'temp' ? c['c-temp'] : c.s1
       const unit = q.metric === 'hum' ? '%' : q.metric === 'temp' ? '°C' : q.metric.endsWith('rate') ? '%' : ''

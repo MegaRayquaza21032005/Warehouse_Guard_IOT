@@ -5,7 +5,7 @@
 #define DEVICE_ID      "esp32-warehouse-01"
 
 // ================== Chân GPIO ==================
-#define PIN_MQ2    34   // MQ2 AO  (ADC1, chỉ input) — qua cầu chia áp xuống <= 3.3V
+#define PIN_MQ135    34   // MQ135 AO  (ADC1, chỉ input) — qua cầu chia áp xuống <= 3.3V
 #define PIN_DHT    4    // DHT11 DATA (D4)
 #define PIN_PIR    27   // PIR OUT (D27)
 #define PIN_FAN    26   // Relay 1 kênh -> quạt (D26)
@@ -24,8 +24,8 @@
 // ================== Ngưỡng MẶC ĐỊNH ==================
 // Chỉ dùng khi flash chưa có cấu hình. Giá trị thực tế chỉnh trong .env rồi chạy
 // tools/push_config.py (gửi qua warehouse/cmd/config, ESP32 lưu vào flash).
-#define DEF_MQ2_WARNING         1500    // ADC thô 0..4095
-#define DEF_MQ2_DANGER          2500
+#define DEF_MQ135_WARNING         1500    // ADC thô 0..4095
+#define DEF_MQ135_DANGER          2500
 #define DEF_TEMP_HIGH           38.0f   // °C
 #define DEF_HUM_HIGH            80.0f   // %
 #define DEF_TEMP_RISE_C         3.0f    // nhiệt độ tăng >= X°C ...
@@ -38,23 +38,23 @@
 #define DEF_HUM_FAN_MIN_DROP    3.0f    // ... mà ẩm giảm < Y% => thông gió không hiệu quả
 
 // ================== Hằng số cố định ==================
-#define MQ2_HYSTERESIS_RAW      150
+#define MQ135_HYSTERESIS_RAW      150
 #define TEMP_HUM_HYSTERESIS     2.0f
 #define SAFETY_EXIT_HOLD_MS     120000UL  // hết nguy hiểm liên tục 2 phút mới hạ trạng thái
 #define HUM_FAN_LOCK_MS         3600000UL // tạm dừng luật "ẩm -> quạt" 60 phút khi không hiệu quả
 #define TEMP_HISTORY_SAMPLE_MS  30000UL   // lấy mẫu nhiệt độ cho phát hiện tăng nhanh
 
-#define MQ2_WARMUP_MS           60000UL   // bỏ qua cảnh báo khi MQ2 đang làm nóng
+#define MQ135_WARMUP_MS           60000UL   // bỏ qua cảnh báo khi MQ135 đang làm nóng
 #define PIR_WARMUP_MS           30000UL   // HC-SR501 cần ~30-60s ổn định
 
 // Phát hiện lỗi cảm biến
-#define MQ2_FAULT_LOW_RAW       10        // <= giá trị này liên tục => đứt dây
-#define MQ2_FAULT_HIGH_RAW      4090      // >= giá trị này liên tục => bão hòa
-#define MQ2_FAULT_MS            10000UL
+#define MQ135_FAULT_LOW_RAW       10        // <= giá trị này liên tục => đứt dây
+#define MQ135_FAULT_HIGH_RAW      4090      // >= giá trị này liên tục => bão hòa
+#define MQ135_FAULT_MS            10000UL
 #define DHT_FAULT_COUNT         5         // lỗi đọc liên tiếp => hỏng
 
 // ================== Chu kỳ ==================
-#define MQ2_READ_MS          1000UL
+#define MQ135_READ_MS          1000UL
 #define DHT_READ_MS          2500UL    // DHT11 đọc tối đa ~1 lần/giây
 #define SENSOR_PUBLISH_MS    5000UL
 #define DEVICE_STATUS_MS     30000UL

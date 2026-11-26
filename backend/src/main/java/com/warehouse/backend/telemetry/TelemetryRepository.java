@@ -21,8 +21,8 @@ public class TelemetryRepository {
     public record SafetyRow(String state, String faultsJson) {
     }
 
-    public void insertMq2(int raw, Integer mv, String level, boolean warmingUp) {
-        jdbc.sql("INSERT INTO app.mq2_readings (raw, mv, level, warming_up) VALUES (?, ?, ?, ?)")
+    public void insertMq135(int raw, Integer mv, String level, boolean warmingUp) {
+        jdbc.sql("INSERT INTO app.mq135_readings (raw, mv, level, warming_up) VALUES (?, ?, ?, ?)")
                 .params(raw, mv, level, warmingUp).update();
     }
 
@@ -40,9 +40,9 @@ public class TelemetryRepository {
                 .query((rs, i) -> new SafetyRow(rs.getString("state"), rs.getString("faults"))).optional();
     }
 
-    public void insertSafety(String state, String mq2Level, Double tempRise, String faultsJson) {
-        jdbc.sql("INSERT INTO app.safety_events (state, mq2_level, temp_rise, faults) VALUES (?, ?, ?, ?::jsonb)")
-                .params(state, mq2Level, tempRise, faultsJson).update();
+    public void insertSafety(String state, String mq135Level, Double tempRise, String faultsJson) {
+        jdbc.sql("INSERT INTO app.safety_events (state, mq135_level, temp_rise, faults) VALUES (?, ?, ?, ?::jsonb)")
+                .params(state, mq135Level, tempRise, faultsJson).update();
     }
 
     public void insertHealth(Boolean online, Long uptimeS, Integer rssi, String ip) {

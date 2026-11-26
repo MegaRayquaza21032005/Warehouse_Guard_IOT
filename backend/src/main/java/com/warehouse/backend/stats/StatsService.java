@@ -58,11 +58,11 @@ public class StatsService {
     private static final Map<String, String[]> MEASURES = Map.of(
             "temp", new String[] { "app.climate_readings", "temp", "temp IS NOT NULL" },
             "hum", new String[] { "app.climate_readings", "hum", "hum IS NOT NULL" },
-            "mq2", new String[] { "app.mq2_readings", "raw", "NOT warming_up" });
+            "mq135", new String[] { "app.mq135_readings", "raw", "NOT warming_up" });
 
-    public static final List<String> METRICS = List.of("temp", "hum", "mq2", "motion_count", "motion_events",
+    public static final List<String> METRICS = List.of("temp", "hum", "mq135", "motion_count", "motion_events",
             "threshold_exceeded_pct", "device_on_minutes", "command_count", "alert_count", "false_alarm_rate",
-            "incident_resolve_minutes", "device_online", "rssi", "mq2_baseline");
+            "incident_resolve_minutes", "device_online", "rssi", "mq135_baseline");
 
     private static final String BUCKET = "date_bin(CAST(:step AS interval), ts, CAST(:origin AS timestamptz))";
 
@@ -94,7 +94,7 @@ public class StatsService {
         Params p = new Params(r, INTERVALS.get(iv), origin());
 
         return switch (metric) {
-            case "temp", "hum", "mq2" -> measure(metric, p, aggs, groupBy, iv);
+            case "temp", "hum", "mq135" -> measure(metric, p, aggs, groupBy, iv);
             case "motion_count" -> motionCount(p, groupBy, iv);
             case "threshold_exceeded_pct" -> thresholdPct(p, groupBy, iv);
             case "device_on_minutes" -> deviceOnMinutes(p, groupBy, device, iv);
@@ -105,13 +105,13 @@ public class StatsService {
             case "incident_resolve_minutes" -> incidentResolve(p, iv);
             case "device_online" -> deviceOnline(p, iv);
             case "rssi" -> simple("rssi", "avg(rssi)", "app.device_health", "rssi IS NOT NULL", p, iv);
-            case "mq2_baseline" -> simple("mq2_baseline", "percentile_cont(0.1) WITHIN GROUP (ORDER BY raw)",
-                    "app.mq2_readings", "NOT warming_up", p, iv);
+            case "mq135_baseline" -> simple("mq135_baseline", "percentile_cont(0.1) WITHIN GROUP (ORDER BY raw)",
+                    "app.mq135_readings", "NOT warming_up", p, iv);
             default -> throw new IllegalStateException(metric);
         };
     }
 
-    // ---------------- Giá trị đo: nhiệt độ, độ ẩm, MQ2 ----------------
+    // ---------------- Giá trị đo: nhiệt độ, độ ẩm, MQ135 ----------------
     private StatsResponse measure(String metric, Params p, List<String> aggs, String groupBy, String iv) {
         String[] m = MEASURES.get(metric);
         if (HEATMAP.equals(groupBy)) {

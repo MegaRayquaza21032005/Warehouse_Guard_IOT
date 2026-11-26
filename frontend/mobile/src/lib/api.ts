@@ -228,7 +228,7 @@ export const getState = () => request<LiveState>('/api/state')
 
 export const readings = {
   climate: (from: string) => request<{ ts: string; temp: number | null; hum: number | null }[]>('/api/readings/climate', { query: { from, limit: 2000 } }),
-  mq2: (from: string) => request<{ ts: string; raw: number; warmingUp: boolean }[]>('/api/readings/mq2', { query: { from, limit: 2000 } }),
+  mq135: (from: string) => request<{ ts: string; raw: number; warmingUp: boolean }[]>('/api/readings/mq135', { query: { from, limit: 2000 } }),
 }
 
 export const getStats = (q: StatsQuery) =>

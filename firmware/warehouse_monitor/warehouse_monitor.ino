@@ -1,7 +1,7 @@
 /*
  * Warehouse Monitor - ESP32 (firmware v2)
  *
- * Cảm biến: MQ2 (GPIO34), DHT11 (GPIO4), PIR (GPIO27)
+ * Cảm biến: MQ135 (GPIO34), DHT11 (GPIO4), PIR (GPIO27)
  * Thiết bị: quạt (GPIO26), phun sương (GPIO25), đèn (GPIO33) qua relay
  *
  * Logic an toàn (CLAUDE.md mục 5) nằm trong logic.h — test trên máy tính bằng
@@ -25,7 +25,7 @@
 using namespace wm;
 
 // ---------------- Topics ----------------
-static const char* T_MQ2        = "warehouse/sensor/mq2";
+static const char* T_MQ135        = "warehouse/sensor/mq135";
 static const char* T_DHT        = "warehouse/sensor/dht11";
 static const char* T_PIR        = "warehouse/sensor/pir";
 static const char* T_ONLINE     = "warehouse/status/online";
@@ -80,10 +80,10 @@ TempHistory   tempHistory;
 
 unsigned long bootAt = 0;
 
-int     mq2Raw = 0, mq2MilliV = 0;
+int     mq135Raw = 0, mq135MilliV = 0;
 MqLevel mqLevel = MQ_NORMAL;
-bool    mq2LowPending = false, mq2HighPending = false;
-unsigned long mq2LowSince = 0, mq2HighSince = 0;
+bool    mq135LowPending = false, mq135HighPending = false;
+unsigned long mq135LowSince = 0, mq135HighSince = 0;
 
 float   temperature = NAN, humidity = NAN, tempRise = 0;
 uint8_t dhtFailCount = 0;
@@ -96,14 +96,14 @@ bool        safetyPublished = false;
 SafetyState pubSafety = SAFE_NORMAL;
 uint8_t     pubFaults = 0;
 
-unsigned long lastMq2Read = 0, lastDhtRead = 0, lastHistSample = 0, lastSensorPublish = 0;
+unsigned long lastMq135Read = 0, lastDhtRead = 0, lastHistSample = 0, lastSensorPublish = 0;
 unsigned long lastDeviceStatus = 0, lastWifiRetry = 0, lastMqttRetry = 0, lastRelaySwitch = 0;
 bool histSampled = false;
 
 // ================================================================
 // Tiện ích
 // ================================================================
-bool mq2Ready() { return millis() - bootAt >= MQ2_WARMUP_MS; }
+bool mq135Ready() { return millis() - bootAt >= MQ135_WARMUP_MS; }
 bool pirReady() { return millis() - bootAt >= PIR_WARMUP_MS; }
 bool dhtFaulted() { return faults & FAULT_DHT_FAILED; }
 
@@ -136,8 +136,8 @@ void loadConfig() {
             validateConfig(stored) == nullptr;
   prefs.end();
   cfg = ok ? stored : Config();
-  Serial.printf("[CFG] %s: mq2 %ld/%ld, temp %.1f, hum %.1f, rise %.1f°C/%umin\n",
-                ok ? "loaded" : "defaults", (long)cfg.mq2Warning, (long)cfg.mq2Danger,
+  Serial.printf("[CFG] %s: mq135 %ld/%ld, temp %.1f, hum %.1f, rise %.1f°C/%umin\n",
+                ok ? "loaded" : "defaults", (long)cfg.mq135Warning, (long)cfg.mq135Danger,
                 cfg.tempHigh, cfg.humHigh, cfg.tempRiseC, cfg.tempRiseWindowMin);
 }
 
@@ -150,8 +150,8 @@ void saveConfig() {
 
 void publishConfig(const char* error = nullptr) {
   JsonDocument doc;
-  doc["mq2Warning"]        = cfg.mq2Warning;
-  doc["mq2Danger"]         = cfg.mq2Danger;
+  doc["mq135Warning"]        = cfg.mq135Warning;
+  doc["mq135Danger"]         = cfg.mq135Danger;
   doc["tempHigh"]          = cfg.tempHigh;
   doc["humHigh"]           = cfg.humHigh;
   doc["tempRiseC"]         = cfg.tempRiseC;
@@ -169,8 +169,8 @@ void publishConfig(const char* error = nullptr) {
 void handleConfigCmd(JsonDocument& doc) {
   // Trường nào không gửi thì giữ giá trị cũ
   Config c = cfg;
-  c.mq2Warning        = doc["mq2Warning"]        | c.mq2Warning;
-  c.mq2Danger         = doc["mq2Danger"]         | c.mq2Danger;
+  c.mq135Warning        = doc["mq135Warning"]        | c.mq135Warning;
+  c.mq135Danger         = doc["mq135Danger"]         | c.mq135Danger;
   c.tempHigh          = doc["tempHigh"]          | c.tempHigh;
   c.humHigh           = doc["humHigh"]           | c.humHigh;
   c.tempRiseC         = doc["tempRiseC"]         | c.tempRiseC;
@@ -199,13 +199,13 @@ void handleConfigCmd(JsonDocument& doc) {
 // ================================================================
 // Publish
 // ================================================================
-void publishMq2() {
+void publishMq135() {
   JsonDocument doc;
-  doc["raw"]       = mq2Raw;
-  doc["mv"]        = mq2MilliV;
+  doc["raw"]       = mq135Raw;
+  doc["mv"]        = mq135MilliV;
   doc["level"]     = mqLevelStr(mqLevel);
-  doc["warmingUp"] = !mq2Ready();
-  publishJson(T_MQ2, doc);
+  doc["warmingUp"] = !mq135Ready();
+  publishJson(T_MQ135, doc);
 }
 
 void publishDht() {
@@ -230,11 +230,11 @@ void publishPir() {
 void publishSafety() {
   JsonDocument doc;
   doc["state"]    = safetyStr(safety.state);
-  doc["mq2Level"] = mqLevelStr(mqLevel);
+  doc["mq135Level"] = mqLevelStr(mqLevel);
   doc["tempRise"] = serialized(String(tempRise, 1));
   JsonArray arr = doc["faults"].to<JsonArray>();
-  if (faults & FAULT_MQ2_DISCONNECTED) arr.add("mq2_disconnected");
-  if (faults & FAULT_MQ2_SATURATED)    arr.add("mq2_saturated");
+  if (faults & FAULT_MQ135_DISCONNECTED) arr.add("mq135_disconnected");
+  if (faults & FAULT_MQ135_SATURATED)    arr.add("mq135_saturated");
   if (faults & FAULT_DHT_FAILED)       arr.add("dht_failed");
   if (publishJson(T_SAFETY, doc, true)) {
     safetyPublished = true; pubSafety = safety.state; pubFaults = faults;
@@ -291,34 +291,34 @@ void publishDeviceChanges() {
 // ================================================================
 // Cảm biến
 // ================================================================
-void readMq2(unsigned long now) {
+void readMq135(unsigned long now) {
   const int samples = 10;
   long sumRaw = 0, sumMv = 0;
   for (int i = 0; i < samples; i++) {
-    sumRaw += analogRead(PIN_MQ2);
-    sumMv  += analogReadMilliVolts(PIN_MQ2);
+    sumRaw += analogRead(PIN_MQ135);
+    sumMv  += analogReadMilliVolts(PIN_MQ135);
     delayMicroseconds(200);
   }
-  mq2Raw    = sumRaw / samples;
-  mq2MilliV = sumMv / samples;
+  mq135Raw    = sumRaw / samples;
+  mq135MilliV = sumMv / samples;
 
   // Lỗi cảm biến: 0 liên tục = đứt dây (cầu chia áp kéo về GND); 4095 liên tục = bão hòa
-  if (mq2Raw <= MQ2_FAULT_LOW_RAW) {
-    if (!mq2LowPending) { mq2LowPending = true; mq2LowSince = now; }
-    else if (now - mq2LowSince >= MQ2_FAULT_MS) faults |= FAULT_MQ2_DISCONNECTED;
-  } else { mq2LowPending = false; faults &= ~FAULT_MQ2_DISCONNECTED; }
+  if (mq135Raw <= MQ135_FAULT_LOW_RAW) {
+    if (!mq135LowPending) { mq135LowPending = true; mq135LowSince = now; }
+    else if (now - mq135LowSince >= MQ135_FAULT_MS) faults |= FAULT_MQ135_DISCONNECTED;
+  } else { mq135LowPending = false; faults &= ~FAULT_MQ135_DISCONNECTED; }
 
-  if (mq2Raw >= MQ2_FAULT_HIGH_RAW) {
-    if (!mq2HighPending) { mq2HighPending = true; mq2HighSince = now; }
-    else if (now - mq2HighSince >= MQ2_FAULT_MS) faults |= FAULT_MQ2_SATURATED;
-  } else { mq2HighPending = false; faults &= ~FAULT_MQ2_SATURATED; }
+  if (mq135Raw >= MQ135_FAULT_HIGH_RAW) {
+    if (!mq135HighPending) { mq135HighPending = true; mq135HighSince = now; }
+    else if (now - mq135HighSince >= MQ135_FAULT_MS) faults |= FAULT_MQ135_SATURATED;
+  } else { mq135HighPending = false; faults &= ~FAULT_MQ135_SATURATED; }
 
   // Bão hòa vẫn được tính là nguy hiểm (có thể là khí rất nhiều)
-  MqLevel lvl = mq2Ready() ? evalMq(mq2Raw, mqLevel, cfg) : MQ_NORMAL;
+  MqLevel lvl = mq135Ready() ? evalMq(mq135Raw, mqLevel, cfg) : MQ_NORMAL;
   if (lvl != mqLevel) {
-    Serial.printf("[MQ2] %s -> %s (raw=%d)\n", mqLevelStr(mqLevel), mqLevelStr(lvl), mq2Raw);
+    Serial.printf("[MQ135] %s -> %s (raw=%d)\n", mqLevelStr(mqLevel), mqLevelStr(lvl), mq135Raw);
     mqLevel = lvl;
-    publishMq2();
+    publishMq135();
   }
 }
 
@@ -491,7 +491,7 @@ void ensureMqtt() {
     publishConfig();
     publishSafety();
     publishDeviceStatus();
-    publishMq2();
+    publishMq135();
     publishDht();
     publishPir();
   } else {
@@ -531,7 +531,7 @@ void setup() {
 
   pinMode(PIN_PIR, INPUT);
   analogReadResolution(12);
-  analogSetPinAttenuation(PIN_MQ2, ADC_11db);
+  analogSetPinAttenuation(PIN_MQ135, ADC_11db);
   dht.begin();
   loadConfig();
 
@@ -545,15 +545,15 @@ void setup() {
   mqtt.setBufferSize(1024);
   mqtt.setSocketTimeout(3);
 
-  Serial.printf("\n[BOOT] %s v2 - MQ2 warm-up %lus, PIR warm-up %lus\n",
-                DEVICE_ID, MQ2_WARMUP_MS / 1000, PIR_WARMUP_MS / 1000);
+  Serial.printf("\n[BOOT] %s v2 - MQ135 warm-up %lus, PIR warm-up %lus\n",
+                DEVICE_ID, MQ135_WARMUP_MS / 1000, PIR_WARMUP_MS / 1000);
 }
 
 void loop() {
   unsigned long now = millis();
 
   // --- Luôn chạy, kể cả khi mất mạng ---
-  if (now - lastMq2Read >= MQ2_READ_MS) { lastMq2Read = now; readMq2(now); }
+  if (now - lastMq135Read >= MQ135_READ_MS) { lastMq135Read = now; readMq135(now); }
   if (now - lastDhtRead >= DHT_READ_MS) { lastDhtRead = now; readDht(now); }
   readPir();
   updateSafety(now);
@@ -568,10 +568,10 @@ void loop() {
 
   if (now - lastSensorPublish >= SENSOR_PUBLISH_MS) {
     lastSensorPublish = now;
-    publishMq2();
+    publishMq135();
     publishDht();
-    Serial.printf("[DATA] mq2=%d(%s) temp=%.1f hum=%.1f rise=%.1f safety=%s fan=%d mist=%d light=%d\n",
-                  mq2Raw, mqLevelStr(mqLevel), temperature, humidity, tempRise,
+    Serial.printf("[DATA] mq135=%d(%s) temp=%.1f hum=%.1f rise=%.1f safety=%s fan=%d mist=%d light=%d\n",
+                  mq135Raw, mqLevelStr(mqLevel), temperature, humidity, tempRise,
                   safetyStr(safety.state), devices[DEV_FAN].actual,
                   devices[DEV_MIST].actual, devices[DEV_LIGHT].actual);
   }

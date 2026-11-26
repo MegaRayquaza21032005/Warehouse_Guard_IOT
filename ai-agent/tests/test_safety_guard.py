@@ -57,16 +57,16 @@ def test_incident_allowlist():
 
 def test_config_validation_like_firmware():
     v, merged = check_config({"tempHigh": 36}, {})
-    assert v.allowed and merged["tempHigh"] == 36.0 and merged["mq2Warning"] == 1500
+    assert v.allowed and merged["tempHigh"] == 36.0 and merged["mq135Warning"] == 1500
     assert not check_config({}, {})[0].allowed
     assert not check_config({"foo": 1}, {})[0].allowed
-    assert not check_config({"mq2Warning": 2400}, {})[0].allowed             # danger 2500 <= 2400 + 150
+    assert not check_config({"mq135Warning": 2400}, {})[0].allowed             # danger 2500 <= 2400 + 150
     assert not check_config({"mistHumMax": 85}, {})[0].allowed              # >= humHigh 80
     assert not check_config({"tempRiseWindowMin": 20}, {})[0].allowed
     assert not check_config({"tempRiseWindowMin": 2.5}, {})[0].allowed      # phải nguyên
     assert not check_config({"tempHigh": True}, {})[0].allowed
-    v, merged = check_config({"mq2Warning": 1000}, {"mq2Danger": 2000, "unknown": 1})
-    assert v.allowed and merged["mq2Danger"] == 2000 and "unknown" not in merged
+    v, merged = check_config({"mq135Warning": 1000}, {"mq135Danger": 2000, "unknown": 1})
+    assert v.allowed and merged["mq135Danger"] == 2000 and "unknown" not in merged
 
 
 def test_memory_cannot_relax_safety_or_store_secrets():

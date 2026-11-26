@@ -25,11 +25,11 @@ class NoTracer:
 async def test_without_llm_everything_is_sent_immediately():
     mqtt = FakeMqtt()
     d = AlertDispatcher(mqtt, NoTracer(), llm_timeout_s=15)
-    await d.dispatch(Alert("gas", "warning", "Khí", "inc-1", {"mq2": 1800}))
+    await d.dispatch(Alert("gas", "warning", "Khí", "inc-1", {"mq135": 1800}))
     topic, p = mqtt.sent[0]
     assert topic == "warehouse/alert"
     assert p["type"] == "gas" and p["level"] == "warning" and p["source"] == "rule"
-    assert p["incident_id"] == "inc-1" and p["details"] == {"mq2": 1800} and p["uid"] and p["ts"]
+    assert p["incident_id"] == "inc-1" and p["details"] == {"mq135": 1800} and p["uid"] and p["ts"]
 
 
 async def test_critical_is_not_delayed_by_slow_llm_and_gets_follow_up():
@@ -54,11 +54,11 @@ async def test_warning_uses_llm_text_but_keeps_level():
         return {"message": "Có khí, có thể do hàn chiều thứ 6", "details": {"note": "welding"}, "level": "info"}
 
     d = AlertDispatcher(mqtt, NoTracer(), llm_timeout_s=15, enricher=llm)
-    await d.dispatch(Alert("gas", "warning", "Khí", None, {"mq2": 1800}))
+    await d.dispatch(Alert("gas", "warning", "Khí", None, {"mq135": 1800}))
     p = mqtt.sent[0][1]
     assert p["message"].startswith("Có khí") and p["source"] == "agent"
     assert p["level"] == "warning"                                  # LLM không hạ được mức
-    assert p["details"] == {"mq2": 1800, "note": "welding"}
+    assert p["details"] == {"mq135": 1800, "note": "welding"}
 
 
 async def test_warning_falls_back_on_timeout_and_error():

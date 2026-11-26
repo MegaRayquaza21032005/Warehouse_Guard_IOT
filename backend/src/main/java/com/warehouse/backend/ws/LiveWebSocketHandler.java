@@ -24,7 +24,7 @@ import tools.jackson.databind.ObjectMapper;
 /**
  * WebSocket /ws/live?token=<access token>.
  * Khi kết nối: gửi {"type":"snapshot","data":{...}}. Sau đó mỗi bản tin MQTT:
- * {"type":"sensor.mq2","topic":"warehouse/sensor/mq2","data":{...},"ts":"..."}.
+ * {"type":"sensor.mq135","topic":"warehouse/sensor/mq135","data":{...},"ts":"..."}.
  */
 @Component
 public class LiveWebSocketHandler extends TextWebSocketHandler implements LiveBroadcaster {

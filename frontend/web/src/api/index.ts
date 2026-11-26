@@ -62,7 +62,7 @@ export interface ClimateReading {
   tempRise: number | null
   error: string | null
 }
-export interface Mq2Reading {
+export interface Mq135Reading {
   ts: string
   raw: number
   mv: number | null
@@ -72,7 +72,7 @@ export interface Mq2Reading {
 
 export const readings = {
   climate: (from: string, to?: string, limit = 2000) => request<ClimateReading[]>('/api/readings/climate', { query: { from, to, limit } }),
-  mq2: (from: string, to?: string, limit = 2000) => request<Mq2Reading[]>('/api/readings/mq2', { query: { from, to, limit } }),
+  mq135: (from: string, to?: string, limit = 2000) => request<Mq135Reading[]>('/api/readings/mq135', { query: { from, to, limit } }),
 }
 
 export function getStats(q: StatsQuery): Promise<StatsResponse> {

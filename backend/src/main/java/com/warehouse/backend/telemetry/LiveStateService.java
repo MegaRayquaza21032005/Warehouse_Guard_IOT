@@ -29,7 +29,7 @@ public class LiveStateService {
 
     public Map<String, Object> snapshot() {
         Map<String, Object> sensors = new LinkedHashMap<>();
-        sensors.put("mq2", entry(Topics.SENSOR_MQ2));
+        sensors.put("mq135", entry(Topics.SENSOR_MQ135));
         sensors.put("dht11", entry(Topics.SENSOR_DHT));
         sensors.put("pir", entry(Topics.SENSOR_PIR));
 

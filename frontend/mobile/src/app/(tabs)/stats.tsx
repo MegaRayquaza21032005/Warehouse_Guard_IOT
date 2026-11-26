@@ -82,10 +82,10 @@ export default function Stats() {
             block={{ ...blk('timeline', { metric: 'device_state', from, to }), query: { metric: 'device_state', from, to } }}
           />
           <Panel
-            title="Khí / khói (MQ2)"
-            block={blk('line', { metric: 'mq2', from, to, interval: r.interval, agg: ['avg', 'min', 'max'] }, [
-              { label: 'Cảnh báo', value: cfg.mq2Warning },
-              { label: 'Nguy hiểm', value: cfg.mq2Danger },
+            title="Khí / khói (MQ135)"
+            block={blk('line', { metric: 'mq135', from, to, interval: r.interval, agg: ['avg', 'min', 'max'] }, [
+              { label: 'Cảnh báo', value: cfg.mq135Warning },
+              { label: 'Nguy hiểm', value: cfg.mq135Danger },
             ])}
           />
           <Panel title="Nhiệt độ theo giờ trong tuần" block={blk('heatmap', { metric: 'temp', from, to, group_by: 'hour_of_day,day_of_week' })} />
@@ -135,9 +135,9 @@ export default function Stats() {
           <Panel title="ESP32 trực tuyến" sub="% thời gian" block={blk('stat', { metric: 'device_online', from, to })} />
           <Panel title="Cường độ WiFi (RSSI)" sub="dBm" block={blk('line', { metric: 'rssi', from, to, interval: daily })} />
           <Panel
-            title="Mức nền MQ2 theo tuần"
+            title="Mức nền MQ135 theo tuần"
             sub="Tăng dần → cảm biến trôi, cần hiệu chuẩn lại"
-            block={blk('line', { metric: 'mq2_baseline', from: from12w, to, interval: '1w' })}
+            block={blk('line', { metric: 'mq135_baseline', from: from12w, to, interval: '1w' })}
           />
         </>
       )}

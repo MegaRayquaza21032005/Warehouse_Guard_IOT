@@ -22,7 +22,7 @@ export default function Dashboard() {
 
   const temp = snap.buffer.map((p) => ({ t: p.t, v: p.temp }))
   const hum = snap.buffer.map((p) => ({ t: p.t, v: p.hum }))
-  const mq2 = snap.buffer.map((p) => ({ t: p.t, v: p.mq2 }))
+  const mq135 = snap.buffer.map((p) => ({ t: p.t, v: p.mq135 }))
 
   return (
     <ScrollView
@@ -58,7 +58,7 @@ export default function Dashboard() {
         <HumCard st={st} cfg={cfg} />
       </View>
       <View style={{ flexDirection: 'row', gap: 12 }}>
-        <Mq2Card st={st} cfg={cfg} />
+        <Mq135Card st={st} cfg={cfg} />
         <PirCard st={st} afterHours={snap.afterHours} hours={fmtWorkHours(snap.workHours)} />
       </View>
       <Card>
@@ -74,8 +74,8 @@ export default function Dashboard() {
         <LineChart rows={hum} color={c.hum} height={120} unit="%" thresholds={[{ label: 'Ngưỡng ẩm', value: cfg.humHigh }]} />
       </Card>
       <Card>
-        <CardTitle title="Khí / khói (MQ2)" sub="Nền vàng = vùng cảnh báo, đỏ = nguy hiểm" />
-        <LineChart rows={mq2} color={c.mq2} height={140} zones={[cfg.mq2Warning, cfg.mq2Danger]} />
+        <CardTitle title="Khí / khói (MQ135)" sub="Nền vàng = vùng cảnh báo, đỏ = nguy hiểm" />
+        <LineChart rows={mq135} color={c.mq135} height={140} zones={[cfg.mq135Warning, cfg.mq135Danger]} />
       </Card>
       <Muted style={{ textAlign: 'center' }}>Cảm biến phổ thông — không thay thế hệ thống báo cháy đạt chuẩn.</Muted>
     </ScrollView>
@@ -199,8 +199,8 @@ function HumCard({ st, cfg }: { st: LiveState; cfg: DeviceConfig }) {
   )
 }
 
-function Mq2Card({ st, cfg }: { st: LiveState; cfg: DeviceConfig }) {
-  const d = st.sensors.mq2?.data
+function Mq135Card({ st, cfg }: { st: LiveState; cfg: DeviceConfig }) {
+  const d = st.sensors.mq135?.data
   const badge = !d
     ? undefined
     : d.warmingUp
@@ -211,7 +211,7 @@ function Mq2Card({ st, cfg }: { st: LiveState; cfg: DeviceConfig }) {
           ? ({ label: 'Cảnh báo', tone: 'warn' } as const)
           : ({ label: 'Bình thường', tone: 'ok' } as const)
   return (
-    <Sensor title="Khí / khói" value={d ? String(d.raw) : '—'} unit="/4095" foot={`Cảnh báo ${cfg.mq2Warning} · Nguy hiểm ${cfg.mq2Danger}`} badge={badge} />
+    <Sensor title="Khí / khói" value={d ? String(d.raw) : '—'} unit="/4095" foot={`Cảnh báo ${cfg.mq135Warning} · Nguy hiểm ${cfg.mq135Danger}`} badge={badge} />
   )
 }
 

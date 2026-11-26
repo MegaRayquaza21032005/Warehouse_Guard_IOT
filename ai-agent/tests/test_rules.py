@@ -152,7 +152,7 @@ def test_intrusion_closes_after_quiet_period(eng):
     eng.on_message("warehouse/sensor/pir", {"motion": True}, t)
     eng.on_message("warehouse/sensor/pir", {"motion": False}, t + 10)
     for s in range(15, 600, 5):                       # ESP32 vẫn gửi dữ liệu đều
-        eng.on_message("warehouse/sensor/mq2", {"raw": 800}, t + s)
+        eng.on_message("warehouse/sensor/mq135", {"raw": 800}, t + s)
     assert types(eng.tick(t + 300)) == []
     a = alerts(eng.tick(t + 600))
     assert [x.type for x in a] == ["recovered"] and a[0].details["kind"] == "intrusion"
@@ -180,11 +180,11 @@ def test_offline_and_back_online(eng):
 def test_no_data_timeout(eng):
     t = at(10)
     eng.on_message("warehouse/status/online", {"status": "online"}, t)
-    eng.on_message("warehouse/sensor/mq2", {"raw": 800}, t)
+    eng.on_message("warehouse/sensor/mq135", {"raw": 800}, t)
     assert types(eng.tick(t + 60)) == []
     assert types(eng.tick(t + 61)) == ["no_data"]
     assert types(eng.tick(t + 120)) == []
-    assert types(eng.on_message("warehouse/sensor/mq2", {"raw": 800}, t + 130)) == ["recovered"]
+    assert types(eng.on_message("warehouse/sensor/mq135", {"raw": 800}, t + 130)) == ["recovered"]
 
 
 def test_command_without_ack_alerts_device_no_response(eng):
@@ -192,7 +192,7 @@ def test_command_without_ack_alerts_device_no_response(eng):
     eng.on_message("warehouse/status/online", {"status": "online"}, t)
     eng.on_message("warehouse/cmd/fan", {"state": "on", "source": "user", "trace_id": "t1"}, t)
     eng.on_message("warehouse/cmd/light", {"state": "on", "source": "user", "trace_id": "t2"}, t)
-    eng.on_message("warehouse/sensor/mq2", {"raw": 800}, t + 5)
+    eng.on_message("warehouse/sensor/mq135", {"raw": 800}, t + 5)
     eng.on_message("warehouse/status/light", {"state": "on", "ack": {"trace_id": "t2", "result": "applied"}}, t + 1)
     a = alerts(eng.tick(t + 10))
     assert [x.type for x in a] == ["device_no_response"] and a[0].details["device"] == "fan"

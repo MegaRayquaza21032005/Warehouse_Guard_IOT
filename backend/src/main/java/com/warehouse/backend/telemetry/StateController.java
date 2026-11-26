@@ -26,10 +26,10 @@ public class StateController {
 
     /** kind -> (bảng, cột). Danh sách cố định để không ghép tên bảng từ input người dùng. */
     private static final Map<String, String[]> READINGS = Map.of(
-            "mq2", new String[] { "app.mq2_readings", "ts, raw, mv, level, warming_up" },
+            "mq135", new String[] { "app.mq135_readings", "ts, raw, mv, level, warming_up" },
             "climate", new String[] { "app.climate_readings", "ts, temp, hum, temp_rise, error" },
             "motion", new String[] { "app.motion_events", "ts, motion" },
-            "safety", new String[] { "app.safety_events", "ts, state, mq2_level, temp_rise, faults::text AS faults" },
+            "safety", new String[] { "app.safety_events", "ts, state, mq135_level, temp_rise, faults::text AS faults" },
             "health", new String[] { "app.device_health", "ts, online, uptime_s, rssi, ip" },
             "device-states", new String[] { "app.device_states", "ts, device, state, mode, reason, source, trace_id" });
 

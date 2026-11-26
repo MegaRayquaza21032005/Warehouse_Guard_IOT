@@ -13,7 +13,7 @@ from app.logging_setup import get_logger
 log = get_logger("AGENT")
 CHART_RE = re.compile(r"```chart\s*\n(.*?)```", re.S)
 CHART_TYPES = {"line", "bar", "stacked_bar", "heatmap", "timeline", "stat"}
-METRICS = {"temp", "hum", "mq2", "motion_count", "threshold_exceeded_pct", "device_on_minutes", "command_count",
+METRICS = {"temp", "hum", "mq135", "motion_count", "threshold_exceeded_pct", "device_on_minutes", "command_count",
            "device_state"}
 
 

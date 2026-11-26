@@ -27,12 +27,12 @@ ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 DEVICES = ("fan", "mist", "light")
 
 DEFAULT_CONFIG = {
-    "mq2Warning": 1500, "mq2Danger": 2500, "tempHigh": 38.0, "humHigh": 80.0,
+    "mq135Warning": 1500, "mq135Danger": 2500, "tempHigh": 38.0, "humHigh": 80.0,
     "tempRiseC": 3.0, "tempRiseWindowMin": 5, "mistFireMaxMin": 10, "mistCoolMaxMin": 5,
     "mistCooldownMin": 15, "mistHumMax": 70.0, "humFanCheckMin": 30, "humFanMinDrop": 3.0,
 }
 
-# kịch bản -> (mq2 raw, nhiệt độ, độ ẩm, trạng thái an toàn)
+# kịch bản -> (mq135 raw, nhiệt độ, độ ẩm, trạng thái an toàn)
 SCENARIOS = {
     "normal":     (800, 30.0, 65.0, "normal"),
     "gas":        (1800, 30.0, 65.0, "gas"),
@@ -81,7 +81,7 @@ class FakeEsp32:
             self.publish_device(d, force=True)
 
     def publish_safety(self, force=False):
-        self.pub("warehouse/status/safety", {"state": self.safety, "mq2Level": self.mq2_level(),
+        self.pub("warehouse/status/safety", {"state": self.safety, "mq135Level": self.mq135_level(),
                                              "tempRise": 0.0, "faults": []}, retain=True)
 
     def publish_device(self, d: str, ack: dict | None = None, force=False):
@@ -98,11 +98,11 @@ class FakeEsp32:
         self.published[d] = snap
 
     # ---------------- logic (đơn giản hóa bảng 5.2) ----------------
-    def mq2_level(self) -> str:
+    def mq135_level(self) -> str:
         raw = SCENARIOS[self.scenario][0]
-        if raw >= self.config["mq2Danger"]:
+        if raw >= self.config["mq135Danger"]:
             return "danger"
-        return "warning" if raw >= self.config["mq2Warning"] else "normal"
+        return "warning" if raw >= self.config["mq135Warning"] else "normal"
 
     def decide(self):
         now = time.time()
@@ -180,7 +180,7 @@ class FakeEsp32:
             if msg.topic == "warehouse/cmd/config":
                 merged = dict(self.config)
                 merged.update({k: v for k, v in data.items() if k in DEFAULT_CONFIG})
-                if merged["mq2Danger"] <= merged["mq2Warning"] + 150 or merged["mistHumMax"] >= merged["humHigh"]:
+                if merged["mq135Danger"] <= merged["mq135Warning"] + 150 or merged["mistHumMax"] >= merged["humHigh"]:
                     self.pub("warehouse/status/config", {**self.config, "error": "invalid_config"}, retain=True)
                     return
                 self.config = merged
@@ -215,8 +215,8 @@ class FakeEsp32:
         raw, temp, hum, _ = SCENARIOS[self.scenario]
         with self.lock:
             self.decide()
-            self.pub("warehouse/sensor/mq2", {"raw": int(raw + random.randint(-40, 40)), "mv": int(raw * 0.8),
-                                              "level": self.mq2_level(), "warmingUp": False})
+            self.pub("warehouse/sensor/mq135", {"raw": int(raw + random.randint(-40, 40)), "mv": int(raw * 0.8),
+                                              "level": self.mq135_level(), "warmingUp": False})
             self.pub("warehouse/sensor/dht11", {"temp": round(temp + random.uniform(-0.3, 0.3), 1),
                                                 "hum": round(hum + random.uniform(-1, 1), 1), "tempRise": 0.0})
             if random.random() < 0.15:

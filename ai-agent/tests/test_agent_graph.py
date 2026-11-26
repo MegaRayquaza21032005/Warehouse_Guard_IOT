@@ -220,7 +220,7 @@ async def test_threshold_change_needs_confirmation_and_sends_full_config(env):
     await g.ainvoke(chat_input("Đổi ngưỡng nóng thành 36"), CFG)
     await g.ainvoke(Command(resume={"approved": True, "user_id": 7}), CFG)
     topic, payload, retain = env["mqtt"].sent[0]
-    assert topic == "warehouse/cmd/config" and retain and payload["tempHigh"] == 36.0 and payload["mq2Warning"] == 1500
+    assert topic == "warehouse/cmd/config" and retain and payload["tempHigh"] == 36.0 and payload["mq135Warning"] == 1500
 
 
 async def test_worker_cannot_use_other_workers_tools(env):
@@ -258,7 +258,7 @@ async def test_incident_notification_returns_content_and_auto_actions_are_limite
          say("Đã gửi cảnh báo.")],
         [AIMessage(content="", tool_calls=[
             {"name": "control_fan", "args": {"state": "on"}, "id": "w1", "type": "tool_call"},
-            {"name": "update_thresholds", "args": {"mq2Warning": 3000}, "id": "w2", "type": "tool_call"},
+            {"name": "update_thresholds", "args": {"mq135Warning": 3000}, "id": "w2", "type": "tool_call"},
             {"name": "control_mist", "args": {"state": "on"}, "id": "w3", "type": "tool_call"}]),
          say("Quạt đã bật; đổi ngưỡng và phun sương bị chặn"),
          call("publish_alert", {"message": "Phát hiện khí, có thể do hàn. Kiểm tra nguồn khí.", "push": False}, "w4"),

@@ -53,7 +53,7 @@ export default function Login() {
               <Ionicons name="business" size={28} color={c.onAccent} />
             </View>
             <Text style={{ color: c.text, fontSize: 22, fontWeight: '800' }}>Giám sát kho</Text>
-            <Muted style={{ textAlign: 'center' }}>Khói, khí gas, nhiệt độ, độ ẩm và an ninh kho theo thời gian thực</Muted>
+            <Muted style={{ textAlign: 'center' }}>Khói, khí độc, nhiệt độ, độ ẩm và an ninh kho theo thời gian thực</Muted>
           </View>
           <Card>
             <Text style={{ color: c.text, fontSize: 18, fontWeight: '700' }}>{reg ? 'Tạo tài khoản' : 'Đăng nhập'}</Text>
@@ -132,7 +132,7 @@ export default function Login() {
               }}
             />
           </Card>
-          <Muted style={{ textAlign: 'center' }}>Cảm biến phổ thông (MQ2, DHT11) — không thay thế hệ thống báo cháy đạt chuẩn.</Muted>
+          <Muted style={{ textAlign: 'center' }}>Cảm biến phổ thông (MQ135, DHT11) — không thay thế hệ thống báo cháy đạt chuẩn.</Muted>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

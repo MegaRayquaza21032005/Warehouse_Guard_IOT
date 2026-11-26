@@ -30,8 +30,8 @@ public class ConfigService {
     private static final Map<String, Number> DEFAULTS = new LinkedHashMap<>();
 
     static {
-        rule("mq2Warning", 150, 4095, true, 1500);
-        rule("mq2Danger", 150, 4095, true, 2500);
+        rule("mq135Warning", 150, 4095, true, 1500);
+        rule("mq135Danger", 150, 4095, true, 2500);
         rule("tempHigh", 0, 80, false, 38);
         rule("humHigh", 10, 100, false, 80);
         rule("tempRiseC", 0.5, 20, false, 3);
@@ -103,10 +103,10 @@ public class ConfigService {
             }
             merged.put(e.getKey(), r.integer() ? (Number) Math.round(v) : (Number) v);
         }
-        double warn = num(merged, "mq2Warning");
-        double danger = num(merged, "mq2Danger");
+        double warn = num(merged, "mq135Warning");
+        double danger = num(merged, "mq135Danger");
         if (danger <= warn + 150) {
-            throw ApiException.badRequest("invalid_mq2_threshold", "mq2Danger phải lớn hơn mq2Warning + 150");
+            throw ApiException.badRequest("invalid_mq135_threshold", "mq135Danger phải lớn hơn mq135Warning + 150");
         }
         if (num(merged, "mistHumMax") >= num(merged, "humHigh")) {
             throw ApiException.badRequest("invalid_mist_hum_max", "mistHumMax phải nhỏ hơn humHigh");

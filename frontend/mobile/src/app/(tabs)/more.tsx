@@ -132,7 +132,7 @@ export default function More() {
           await auth.logout()
         }}
       />
-      <Muted style={{ textAlign: 'center' }}>Cảm biến phổ thông (MQ2, DHT11) — không thay thế hệ thống báo cháy đạt chuẩn.</Muted>
+      <Muted style={{ textAlign: 'center' }}>Cảm biến phổ thông (MQ135, DHT11) — không thay thế hệ thống báo cháy đạt chuẩn.</Muted>
     </ScrollView>
   )
 }

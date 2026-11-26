@@ -162,10 +162,10 @@ class StatsIntegrationTest extends IntegrationTestBase {
                 .andExpect(jsonPath("$.series[0].points.length()").value(2))
                 .andExpect(jsonPath("$.series[0].points[0].t").value("2026-01-05T13:00:00Z"));
         for (int i = 0; i < 10; i++) {
-            jdbc.sql("INSERT INTO app.mq2_readings (ts, raw, mv, level, warming_up) VALUES (?, ?, 0, 'normal', false)")
+            jdbc.sql("INSERT INTO app.mq135_readings (ts, raw, mv, level, warming_up) VALUES (?, ?, 0, 'normal', false)")
                     .params(OffsetDateTime.parse(DAY + "00:0" + i + ":00+07:00"), 100 + i * 10).update();
         }
-        mvc.perform(get("/api/stats?metric=mq2_baseline&interval=1h" + range("00:00:00", "01:00:00"))
+        mvc.perform(get("/api/stats?metric=mq135_baseline&interval=1h" + range("00:00:00", "01:00:00"))
                 .header("Authorization", auth)).andExpect(jsonPath("$.series[0].points[0].v").value(109.0));
     }
 

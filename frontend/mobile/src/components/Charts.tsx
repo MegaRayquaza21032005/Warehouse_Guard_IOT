@@ -118,7 +118,7 @@ function Legend({ items }: { items: { label: string; color: string }[] }) {
   )
 }
 
-// ------------------------------------------------------------------ đường (kèm dải min–max, ngưỡng, vùng nền MQ2)
+// ------------------------------------------------------------------ đường (kèm dải min–max, ngưỡng, vùng nền MQ135)
 
 export function LineChart({
   rows,
@@ -133,7 +133,7 @@ export function LineChart({
   height?: number
   unit?: string
   thresholds?: { label: string; value: number }[]
-  /** Nền theo vùng (MQ2): [cảnh báo, nguy hiểm]. */
+  /** Nền theo vùng (MQ135): [cảnh báo, nguy hiểm]. */
   zones?: [number, number]
 }) {
   const c = useColors()
@@ -384,7 +384,7 @@ export function DeviceTimeline({ rows, from, to }: { rows: { device: DeviceName;
 // ------------------------------------------------------------------ khối biểu đồ
 
 function metricColor(c: Colors, metric: string) {
-  return metric === 'hum' ? c.hum : metric === 'temp' ? c.temp : metric === 'mq2' ? c.mq2 : c.series[0]
+  return metric === 'hum' ? c.hum : metric === 'temp' ? c.temp : metric === 'mq135' ? c.mq135 : c.series[0]
 }
 
 export function ChartBlockView({ block, height = 180 }: { block: ChartBlock; height?: number }) {
@@ -405,10 +405,10 @@ export function ChartBlockView({ block, height = 180 }: { block: ChartBlock; hei
   switch (block.chart) {
     case 'line': {
       const rows = statsToRows(stats)
-      if (q.metric === 'mq2') {
+      if (q.metric === 'mq135') {
         const wv = block.thresholds?.[0]?.value ?? 1500
         const dv = block.thresholds?.[1]?.value ?? 2500
-        return <LineChart rows={rows} color={c.mq2} height={height} zones={[wv, dv]} />
+        return <LineChart rows={rows} color={c.mq135} height={height} zones={[wv, dv]} />
       }
       return <LineChart rows={rows} color={metricColor(c, q.metric)} height={height} unit={unit} thresholds={block.thresholds} />
     }

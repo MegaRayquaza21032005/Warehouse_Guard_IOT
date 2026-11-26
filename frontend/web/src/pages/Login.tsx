@@ -36,7 +36,7 @@ export default function Login({ onLogin }: { onLogin: (u: User) => void }) {
           <Warehouse size={22} /> Giám sát kho
         </div>
         <div>
-          <h2>Theo dõi khói, khí gas, nhiệt độ và an ninh kho hàng theo thời gian thực.</h2>
+          <h2>Theo dõi khói, khí độc, nhiệt độ và an ninh kho hàng theo thời gian thực.</h2>
           <ul>
             <li>
               <Gauge size={18} /> Số liệu cảm biến và trạng thái thiết bị trực tiếp

@@ -90,8 +90,8 @@ export default function Stats() {
           <Panel title="Cường độ WiFi (RSSI)" sub="dBm">
             <ChartBlockView block={blk('line', 'RSSI', { metric: 'rssi', from, to, interval: daily })} height={160} />
           </Panel>
-          <Panel title="Mức nền MQ2 theo tuần" sub="Tăng dần → cảm biến trôi, cần hiệu chuẩn lại" span>
-            <ChartBlockView block={blk('line', 'Mức nền MQ2', { metric: 'mq2_baseline', from: from12w, to, interval: '1w' })} height={180} />
+          <Panel title="Mức nền MQ135 theo tuần" sub="Tăng dần → cảm biến trôi, cần hiệu chuẩn lại" span>
+            <ChartBlockView block={blk('line', 'Mức nền MQ135', { metric: 'mq135_baseline', from: from12w, to, interval: '1w' })} height={180} />
           </Panel>
         </div>
       )}
@@ -133,11 +133,11 @@ function EnvTab({ from, to, interval, daily }: { from: string; to: string; inter
           {tl ? <DeviceTimeline rows={tl} from={new Date(from).getTime()} to={new Date(to).getTime()} /> : <ChartSkeleton height={80} />}
         </div>
       </Panel>
-      <Panel title="Khí / khói (MQ2)" sub="Trung bình và đỉnh, nền theo vùng" span>
+      <Panel title="Khí / khói (MQ135)" sub="Trung bình và đỉnh, nền theo vùng" span>
         <ChartBlockView
-          block={blk('line', 'MQ2', { metric: 'mq2', from, to, interval, agg: ['avg', 'min', 'max'] }, [
-            { label: 'Cảnh báo', value: cfg.mq2Warning },
-            { label: 'Nguy hiểm', value: cfg.mq2Danger },
+          block={blk('line', 'MQ135', { metric: 'mq135', from, to, interval, agg: ['avg', 'min', 'max'] }, [
+            { label: 'Cảnh báo', value: cfg.mq135Warning },
+            { label: 'Nguy hiểm', value: cfg.mq135Danger },
           ])}
         />
       </Panel>

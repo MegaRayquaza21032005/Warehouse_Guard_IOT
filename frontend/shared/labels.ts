@@ -15,7 +15,7 @@ export const SAFETY_LABEL: Record<SafetyState, string> = {
 
 export const SAFETY_HINT: Record<SafetyState, string> = {
   normal: 'Không phát hiện bất thường.',
-  gas: 'MQ2 vượt ngưỡng cảnh báo, nhiệt độ bình thường. Quạt đang thông gió.',
+  gas: 'MQ135 vượt ngưỡng cảnh báo, nhiệt độ bình thường. Quạt đang thông gió.',
   gas_danger: 'Nồng độ khí rất cao. Quạt và đèn bật, phun sương tắt. Kiểm tra nguồn rò rỉ.',
   fire: 'Khói kèm nhiệt độ cao hoặc tăng nhanh. Quạt TẮT, phun sương và đèn BẬT.',
 }
@@ -77,8 +77,8 @@ export const alertTypeLabel = (t: string) => {
 }
 
 export const FAULT_LABEL: Record<string, string> = {
-  mq2_disconnected: 'MQ2 mất kết nối (đọc ≈ 0)',
-  mq2_saturated: 'MQ2 bão hòa (đọc ≈ 4095)',
+  mq135_disconnected: 'MQ135 mất kết nối (đọc ≈ 0)',
+  mq135_saturated: 'MQ135 bão hòa (đọc ≈ 4095)',
   dht_failed: 'DHT11 đọc lỗi liên tiếp',
 }
 

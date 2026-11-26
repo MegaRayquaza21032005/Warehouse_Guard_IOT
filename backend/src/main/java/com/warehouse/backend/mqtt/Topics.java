@@ -11,7 +11,7 @@ public final class Topics {
     public static final String PREFIX = "warehouse/";
     public static final String SUBSCRIBE_ALL = "warehouse/#";
 
-    public static final String SENSOR_MQ2 = "warehouse/sensor/mq2";
+    public static final String SENSOR_MQ135 = "warehouse/sensor/mq135";
     public static final String SENSOR_DHT = "warehouse/sensor/dht11";
     public static final String SENSOR_PIR = "warehouse/sensor/pir";
     public static final String STATUS_SAFETY = "warehouse/status/safety";

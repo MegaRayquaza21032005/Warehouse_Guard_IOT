@@ -23,8 +23,8 @@ SAFETY_RANK = {"normal": 0, "gas": 1, "gas_danger": 2, "fire": 3}
 LEVEL_RANK = {"info": 0, "warning": 1, "critical": 2}
 DEVICE_NAMES = {"fan": "Quạt", "mist": "Phun sương", "light": "Đèn"}
 FAULT_MESSAGES = {
-    "mq2_disconnected": "Cảm biến khói MQ2 có thể bị đứt dây (đọc ≈ 0). Hệ thống KHÔNG phát hiện được khói cho tới khi sửa.",
-    "mq2_saturated": "Cảm biến MQ2 bão hòa (đọc ≈ 4095): có thể khí rất nhiều hoặc chập dây. Vẫn được tính là nguy hiểm.",
+    "mq135_disconnected": "Cảm biến khói MQ135 có thể bị đứt dây (đọc ≈ 0). Hệ thống KHÔNG phát hiện được khói cho tới khi sửa.",
+    "mq135_saturated": "Cảm biến MQ135 bão hòa (đọc ≈ 4095): có thể khí rất nhiều hoặc chập dây. Vẫn được tính là nguy hiểm.",
     "dht_failed": "Cảm biến nhiệt độ / độ ẩm DHT11 không đọc được. Phát hiện cháy chỉ còn dựa vào khói.",
 }
 WINDOW_S = 3600            # bộ đệm 60 phút
@@ -84,7 +84,7 @@ class RuleEngine:
         self.last_light_cmd_at: float | None = None
 
         self.climate: deque[tuple[float, float, float]] = deque()   # (ts, temp, hum)
-        self.mq2: deque[tuple[float, int]] = deque()
+        self.mq135: deque[tuple[float, int]] = deque()
         self.hot = False
         self.hot_since: float | None = None
         self.hot_alerted = False
@@ -110,8 +110,8 @@ class RuleEngine:
 
         if group == "sensor":
             self._on_data(now, acts)
-            if name == "mq2" and isinstance(data.get("raw"), (int, float)):
-                self.mq2.append((now, int(data["raw"])))
+            if name == "mq135" and isinstance(data.get("raw"), (int, float)):
+                self.mq135.append((now, int(data["raw"])))
             elif name == "dht11" and _num(data.get("temp")) is not None and _num(data.get("hum")) is not None:
                 self._on_climate(float(data["temp"]), float(data["hum"]), now, acts)
             elif name == "pir" and isinstance(data.get("motion"), bool):
@@ -363,7 +363,7 @@ class RuleEngine:
                     key=f"recovered:{inc.id}", incident=inc, details={"duration_min": minutes, "kind": inc.kind})
 
     def _trim(self, now: float) -> None:
-        for dq in (self.climate, self.mq2):
+        for dq in (self.climate, self.mq135):
             while dq and now - dq[0][0] > WINDOW_S:
                 dq.popleft()
 
@@ -371,15 +371,15 @@ class RuleEngine:
         d: dict[str, Any] = {"safety": self.safety}
         if self.climate:
             d["temp"], d["hum"] = self.climate[-1][1], self.climate[-1][2]
-        if self.mq2:
-            d["mq2"] = self.mq2[-1][1]
+        if self.mq135:
+            d["mq135"] = self.mq135[-1][1]
         if self.faults:
             d["faults"] = sorted(self.faults)
         return d
 
     def _sensor_summary(self) -> str:
         s = self._sensor_snapshot()
-        parts = [f"{k}={s[k]}" for k in ("mq2", "temp", "hum") if k in s]
+        parts = [f"{k}={s[k]}" for k in ("mq135", "temp", "hum") if k in s]
         return f"({', '.join(parts)})" if parts else ""
 
     def snapshot(self) -> dict[str, Any]:
@@ -391,7 +391,7 @@ class RuleEngine:
             "incidents": {k: {"id": v.id, "level": v.level, "state": v.state, "openedAt": v.opened_at}
                           for k, v in self.incidents.items()},
             "pendingCommands": len(self.pending_cmds),
-            "window": {"climate": len(self.climate), "mq2": len(self.mq2)},
+            "window": {"climate": len(self.climate), "mq135": len(self.mq135)},
             "latest": self._sensor_snapshot(),
             "devices": {k: {f: v.get(f) for f in ("state", "mode", "reason", "source")} for k, v in self.devices.items()},
         }

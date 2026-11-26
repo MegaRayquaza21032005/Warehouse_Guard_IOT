@@ -2,8 +2,8 @@ import type { DeviceConfig, WorkHours } from './types'
 
 /** Mặc định của firmware (`config.h`) — dùng khi ESP32 chưa gửi `status/config`. */
 export const DEFAULT_CONFIG: DeviceConfig = {
-  mq2Warning: 1500,
-  mq2Danger: 2500,
+  mq135Warning: 1500,
+  mq135Danger: 2500,
   tempHigh: 38,
   humHigh: 80,
   tempRiseC: 3,
@@ -18,8 +18,8 @@ export const DEFAULT_CONFIG: DeviceConfig = {
 
 /** Kiểm tra giống firmware (CLAUDE.md mục 4, `cmd/config`). Trả về lỗi hoặc null. */
 export function validateConfig(c: DeviceConfig): string | null {
-  if (c.mq2Danger <= c.mq2Warning + 150) return 'Ngưỡng nguy hiểm MQ2 phải lớn hơn ngưỡng cảnh báo + 150'
-  if (c.mq2Danger > 4095) return 'Ngưỡng nguy hiểm MQ2 tối đa 4095'
+  if (c.mq135Danger <= c.mq135Warning + 150) return 'Ngưỡng nguy hiểm MQ135 phải lớn hơn ngưỡng cảnh báo + 150'
+  if (c.mq135Danger > 4095) return 'Ngưỡng nguy hiểm MQ135 tối đa 4095'
   if (c.mistHumMax >= c.humHigh) return 'Độ ẩm cho phép phun sương phải nhỏ hơn ngưỡng độ ẩm cao'
   if (c.tempRiseWindowMin < 1 || c.tempRiseWindowMin > 15) return 'Khoảng thời gian tăng nhiệt: 1–15 phút'
   for (const k of ['mistFireMaxMin', 'mistCoolMaxMin'] as const) if (c[k] < 1 || c[k] > 60) return 'Thời gian phun sương: 1–60 phút'

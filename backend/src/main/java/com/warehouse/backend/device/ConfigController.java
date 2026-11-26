@@ -26,7 +26,7 @@ public class ConfigController {
         return config.current();
     }
 
-    /** Body: chỉ các trường muốn đổi, vd. {"mq2Warning": 1700}. Trả 202; ESP32 xác nhận qua status/config. */
+    /** Body: chỉ các trường muốn đổi, vd. {"mq135Warning": 1700}. Trả 202; ESP32 xác nhận qua status/config. */
     @PutMapping
     @ResponseStatus(HttpStatus.ACCEPTED)
     public Map<String, Object> update(@RequestBody Map<String, Object> patch) {

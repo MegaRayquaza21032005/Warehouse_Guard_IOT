@@ -11,10 +11,10 @@ import { Badge, Button, Card, CardTitle, ErrorText, Muted } from '../components/
 
 const FIELDS: { group: string; items: { key: keyof DeviceConfig; label: string; unit: string; hint?: string }[] }[] = [
   {
-    group: 'Khí / khói (MQ2)',
+    group: 'Khí / khói (MQ135)',
     items: [
-      { key: 'mq2Warning', label: 'Ngưỡng cảnh báo', unit: 'ADC', hint: '0–4095' },
-      { key: 'mq2Danger', label: 'Ngưỡng nguy hiểm', unit: 'ADC', hint: '> cảnh báo + 150' },
+      { key: 'mq135Warning', label: 'Ngưỡng cảnh báo', unit: 'ADC', hint: '0–4095' },
+      { key: 'mq135Danger', label: 'Ngưỡng nguy hiểm', unit: 'ADC', hint: '> cảnh báo + 150' },
     ],
   },
   {

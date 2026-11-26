@@ -21,7 +21,7 @@ import { fmtWorkHours } from '../lib/config'
 import { DEVICE_LABEL, FAULT_LABEL, SAFETY_HINT, SAFETY_LABEL, SOURCE_LABEL, fmtAgo, fmtDuration, reasonLabel } from '../lib/labels'
 import { devices as devicesApi, errorText } from '../api'
 import AlertList from '../components/AlertList'
-import { ClimateStack, Mq2Chart, type TimeRow } from '../components/charts/Charts'
+import { ClimateStack, Mq135Chart, type TimeRow } from '../components/charts/Charts'
 
 export default function Dashboard() {
   const snap = useLive()
@@ -31,8 +31,8 @@ export default function Dashboard() {
   const rows = useMemo(() => {
     const temp: TimeRow[] = buffer.map((p) => ({ t: p.t, v: p.temp }))
     const hum: TimeRow[] = buffer.map((p) => ({ t: p.t, v: p.hum }))
-    const mq2: TimeRow[] = buffer.map((p) => ({ t: p.t, v: p.mq2 }))
-    return { temp, hum, mq2 }
+    const mq135: TimeRow[] = buffer.map((p) => ({ t: p.t, v: p.mq135 }))
+    return { temp, hum, mq135 }
   }, [buffer])
 
   return (
@@ -42,7 +42,7 @@ export default function Dashboard() {
       <div className="grid cols-4">
         <TempCard live={live} cfg={cfg} />
         <HumCard live={live} cfg={cfg} />
-        <Mq2Card live={live} cfg={cfg} />
+        <Mq135Card live={live} cfg={cfg} />
         <PirCard live={live} afterHours={afterHours} workHours={workHours} />
       </div>
 
@@ -88,10 +88,10 @@ export default function Dashboard() {
 
       <div className="card">
         <div className="card-head">
-          <h2>Khí / khói (MQ2)</h2>
+          <h2>Khí / khói (MQ135)</h2>
           <span className="sub">30 phút gần nhất · nền màu theo vùng bình thường / cảnh báo / nguy hiểm</span>
         </div>
-        <Mq2Chart rows={rows.mq2} warning={cfg.mq2Warning} danger={cfg.mq2Danger} height={190} />
+        <Mq135Chart rows={rows.mq135} warning={cfg.mq135Warning} danger={cfg.mq135Danger} height={190} />
       </div>
     </>
   )
@@ -100,7 +100,7 @@ export default function Dashboard() {
 // ------------------------------------------------------------------ trạng thái an toàn
 
 function SafetyBanner({ live }: { live: LiveState }) {
-  const s = live.safety?.data ?? { state: 'normal' as const, mq2Level: 'normal' as const, tempRise: 0, faults: [] }
+  const s = live.safety?.data ?? { state: 'normal' as const, mq135Level: 'normal' as const, tempRise: 0, faults: [] }
   const noData = !live.safety
   const offline = live.online?.data.status === 'offline'
   const Icon = s.state === 'fire' ? Flame : s.state === 'gas_danger' ? Siren : s.state === 'gas' ? ShieldAlert : ShieldCheck
@@ -222,17 +222,17 @@ function HumCard({ live, cfg }: { live: LiveState; cfg: DeviceConfig }) {
   )
 }
 
-function Mq2Card({ live, cfg }: { live: LiveState; cfg: DeviceConfig }) {
-  const d = live.sensors.mq2?.data ?? { raw: 0, mv: 0, level: 'normal' as const, warmingUp: false }
-  const none = !live.sensors.mq2
-  const color = d.level === 'danger' ? 'var(--crit)' : d.level === 'warning' ? 'var(--warn)' : 'var(--c-mq2)'
+function Mq135Card({ live, cfg }: { live: LiveState; cfg: DeviceConfig }) {
+  const d = live.sensors.mq135?.data ?? { raw: 0, mv: 0, level: 'normal' as const, warmingUp: false }
+  const none = !live.sensors.mq135
+  const color = d.level === 'danger' ? 'var(--crit)' : d.level === 'warning' ? 'var(--warn)' : 'var(--c-mq135)'
   return (
     <div className="card sensor">
       <div className="label">
-        <span className="ic" style={{ background: 'color-mix(in oklab, var(--c-mq2) 16%, transparent)', color: 'var(--c-mq2)' }}>
+        <span className="ic" style={{ background: 'color-mix(in oklab, var(--c-mq135) 16%, transparent)', color: 'var(--c-mq135)' }}>
           <Wind size={17} />
         </span>
-        Khí / khói (MQ2)
+        Khí / khói (MQ135)
         <span className={`badge ${d.level === 'danger' ? 'crit' : d.level === 'warning' ? 'warn' : 'ok'}`} style={{ marginLeft: 'auto' }}>
           {none ? 'Chưa có' : d.warmingUp ? 'Đang làm nóng' : d.level === 'danger' ? 'Nguy hiểm' : d.level === 'warning' ? 'Cảnh báo' : 'Bình thường'}
         </span>
@@ -241,10 +241,10 @@ function Mq2Card({ live, cfg }: { live: LiveState; cfg: DeviceConfig }) {
         {none ? '—' : d.raw}
         <small>/ 4095</small>
       </div>
-      <Gauge value={d.raw} max={4095} color={color} marks={[cfg.mq2Warning, cfg.mq2Danger]} />
+      <Gauge value={d.raw} max={4095} color={color} marks={[cfg.mq135Warning, cfg.mq135Danger]} />
       <div className="foot">
         <span>
-          Cảnh báo {cfg.mq2Warning} · Nguy hiểm {cfg.mq2Danger}
+          Cảnh báo {cfg.mq135Warning} · Nguy hiểm {cfg.mq135Danger}
         </span>
         <span>·</span>
         <span className="num">{d.mv} mV</span>

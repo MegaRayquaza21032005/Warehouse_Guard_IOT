@@ -1,17 +1,17 @@
 // Kiểu dữ liệu khớp với MQTT contract (CLAUDE.md mục 4) và API của Java BE (backend/README.md).
 // Dùng chung cho web (frontend/web) và mobile (frontend/mobile).
 
-export type Mq2Level = 'normal' | 'warning' | 'danger'
+export type Mq135Level = 'normal' | 'warning' | 'danger'
 export type SafetyState = 'normal' | 'gas' | 'gas_danger' | 'fire'
 export type DeviceName = 'fan' | 'mist' | 'light'
 export type CommandSource = 'esp32_local' | 'user' | 'rule' | 'agent'
 export type AlertLevel = 'critical' | 'warning' | 'info'
 export type AckResult = 'applied' | 'ignored_user_priority' | 'invalid_command' | 'invalid_source'
 
-export interface Mq2Data {
+export interface Mq135Data {
   raw: number
   mv: number
-  level: Mq2Level
+  level: Mq135Level
   warmingUp: boolean
 }
 
@@ -29,7 +29,7 @@ export interface PirData {
 
 export interface SafetyData {
   state: SafetyState
-  mq2Level: Mq2Level
+  mq135Level: Mq135Level
   tempRise: number
   faults: string[]
 }
@@ -51,8 +51,8 @@ export interface DeviceHealth {
 }
 
 export interface DeviceConfig {
-  mq2Warning: number
-  mq2Danger: number
+  mq135Warning: number
+  mq135Danger: number
   tempHigh: number
   humHigh: number
   tempRiseC: number
@@ -86,7 +86,7 @@ export interface LiveState {
   device: Stamped<DeviceHealth> | null
   safety: Stamped<SafetyData> | null
   sensors: {
-    mq2: Stamped<Mq2Data> | null
+    mq135: Stamped<Mq135Data> | null
     dht11: Stamped<Dht11Data> | null
     pir: Stamped<PirData> | null
   }

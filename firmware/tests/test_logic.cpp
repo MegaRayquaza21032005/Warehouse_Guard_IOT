@@ -33,14 +33,14 @@ static void test_config() {
   std::printf("config\n");
   Config c;
   CHECK(validateConfig(c) == nullptr);
-  Config bad = c; bad.mq2Danger = bad.mq2Warning + 100;      CHECK(validateConfig(bad) != nullptr);
+  Config bad = c; bad.mq135Danger = bad.mq135Warning + 100;      CHECK(validateConfig(bad) != nullptr);
   bad = c; bad.mistHumMax = bad.humHigh;                      CHECK(validateConfig(bad) != nullptr);
   bad = c; bad.tempRiseWindowMin = 20;                        CHECK(validateConfig(bad) != nullptr);
-  CHECK(c.mq2Warning == 1500);
+  CHECK(c.mq135Warning == 1500);
 }
 
 static void test_mq_level() {
-  std::printf("mq2 level + hysteresis\n");
+  std::printf("mq135 level + hysteresis\n");
   Config c;
   CHECK(evalMq(1000, MQ_NORMAL, c) == MQ_NORMAL);
   CHECK(evalMq(1500, MQ_NORMAL, c) == MQ_WARNING);

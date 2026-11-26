@@ -13,7 +13,7 @@ import { Badge, Button, Card, ErrorText, Muted } from '../../components/ui'
 const DETAIL_LABEL: Record<string, string> = {
   temp: 'Nhiệt độ (°C)',
   hum: 'Độ ẩm (%)',
-  mq2: 'MQ2',
+  mq135: 'MQ135',
   safety: 'Trạng thái an toàn',
   duration_min: 'Thời gian (phút)',
   motion: 'Chuyển động',

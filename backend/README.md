@@ -53,8 +53,8 @@ Lỗi luôn có dạng `{"error": "<mã>", "message": "...", "details": {...}}`.
 
 | Method | Path | Ghi chú |
 |--------|------|---------|
-| GET | `/api/state` | Snapshot hiện tại: `online`, `device`, `safety`, `sensors{mq2,dht11,pir}`, `devices{fan,mist,light}`, `config`, `brokerConnected`, `workHours{start,end,days,timezone}`. Mỗi mục `{"data": <payload MQTT>, "updatedAt"}`, hoặc `null` nếu ESP32 chưa từng gửi |
-| GET | `/api/readings/{kind}?from&to&limit&device` | Dữ liệu thô, mới nhất trước. `kind`: `mq2`, `climate`, `motion`, `safety`, `health`, `device-states`. Mặc định 1 giờ gần nhất, tối đa 5000 dòng |
+| GET | `/api/state` | Snapshot hiện tại: `online`, `device`, `safety`, `sensors{mq135,dht11,pir}`, `devices{fan,mist,light}`, `config`, `brokerConnected`, `workHours{start,end,days,timezone}`. Mỗi mục `{"data": <payload MQTT>, "updatedAt"}`, hoặc `null` nếu ESP32 chưa từng gửi |
+| GET | `/api/readings/{kind}?from&to&limit&device` | Dữ liệu thô, mới nhất trước. `kind`: `mq135`, `climate`, `motion`, `safety`, `health`, `device-states`. Mặc định 1 giờ gần nhất, tối đa 5000 dòng |
 
 ### Thiết bị
 
@@ -64,7 +64,7 @@ Lỗi luôn có dạng `{"error": "<mã>", "message": "...", "details": {...}}`.
 | POST | `/api/devices/{fan\|mist\|light}/command` | Body `{"state":"on"}`, `{"state":"off","durationS":600}` hoặc `{"mode":"auto"}`. 202 `{"traceId",...}`. ESP32 xác nhận qua WebSocket `status.*` có `ack.trace_id`. 503 `mqtt_unavailable` nếu broker mất |
 | GET | `/api/device-logs?device&source&from&to&page&size` | Nhật ký lệnh **mọi nguồn** (`esp32_local`, `rule`, `agent`, `user`), kèm `result` ESP32 xác nhận. Mặc định 7 ngày |
 | GET | `/api/config` | Ngưỡng ESP32 đang dùng (chưa có → mặc định firmware) |
-| PUT | `/api/config` | Chỉ gửi trường muốn đổi, vd. `{"mq2Warning":1700}`. Kiểm tra giống firmware; 202 → ESP32 xác nhận qua `status/config` |
+| PUT | `/api/config` | Chỉ gửi trường muốn đổi, vd. `{"mq135Warning":1700}`. Kiểm tra giống firmware; 202 → ESP32 xác nhận qua `status/config` |
 
 ### Cảnh báo
 
@@ -81,7 +81,7 @@ Lỗi luôn có dạng `{"error": "<mã>", "message": "...", "details": {...}}`.
 
 | `metric` | `agg` | `group_by` | Ghi chú |
 |----------|-------|------------|---------|
-| `temp`, `hum`, `mq2` | `avg,min,max` | — hoặc `hour_of_day,day_of_week` (heatmap → `cells`) | MQ2 bỏ qua lúc làm nóng |
+| `temp`, `hum`, `mq135` | `avg,min,max` | — hoặc `hour_of_day,day_of_week` (heatmap → `cells`) | MQ135 bỏ qua lúc làm nóng |
 | `motion_count` | — | — / `work_hours` / `hour_of_day,day_of_week` | `work_hours` → series `work_hours`, `after_hours` theo `WORK_*` |
 | `threshold_exceeded_pct` | — | — | Series `temp`, `hum`: % thời gian vượt `tempHigh` / `humHigh` |
 | `device_on_minutes` | — | — / `reason` | Cần `device`; chia chính xác theo bucket |
@@ -92,7 +92,7 @@ Lỗi luôn có dạng `{"error": "<mã>", "message": "...", "details": {...}}`.
 | `incident_resolve_minutes` | — | — | `stat`: trung bình `details.duration_min` của cảnh báo `recovered` |
 | `device_online` | — | — | `stat`: % thời gian ESP32 online (series `uptime_pct`, theo `status/online` + heartbeat) |
 | `rssi` | — | — | Trung bình RSSI WiFi |
-| `mq2_baseline` | — | — | Phân vị 10% của MQ2 (bỏ lúc làm nóng) — mức nền, tăng dần = cảm biến trôi |
+| `mq135_baseline` | — | — | Phân vị 10% của MQ135 (bỏ lúc làm nóng) — mức nền, tăng dần = cảm biến trôi |
 
 - `interval`: `5m`, `1h` (mặc định), `1d`, `1w`; tối đa 2000 điểm. Bucket ngày / tuần bắt đầu 00:00 / thứ Hai giờ Việt Nam.
 - Mặc định 24 giờ gần nhất. `dayOfWeek`: 1 = thứ Hai … 7 = Chủ nhật.
@@ -149,10 +149,10 @@ Mỗi cảnh báo lưu vào `app.alerts` sẽ được **push cho mọi máy đ�
 `ws://<host>:8080/ws/live?token=<accessToken>` (sai / thiếu token → 401).
 
 1. Ngay khi kết nối: `{"type":"snapshot","data":<giống GET /api/state>,"ts"}`.
-2. Mỗi bản tin MQTT: `{"type":"sensor.mq2","topic":"warehouse/sensor/mq2","data":{...},"ts"}`. `type` = topic bỏ `warehouse/`, `/` → `.`: `sensor.mq2|dht11|pir`, `status.safety|online|device|config|fan|mist|light`, `alert` (data là cảnh báo đã lưu, có `id`).
+2. Mỗi bản tin MQTT: `{"type":"sensor.mq135","topic":"warehouse/sensor/mq135","data":{...},"ts"}`. `type` = topic bỏ `warehouse/`, `/` → `.`: `sensor.mq135|dht11|pir`, `status.safety|online|device|config|fan|mist|light`, `alert` (data là cảnh báo đã lưu, có `id`).
 
 Token hết hạn không tự ngắt WebSocket đang mở; client nên kết nối lại với token mới sau khi refresh.
 
 ## Database (schema `app`)
 
-`users`, `refresh_tokens` (SHA-256), `push_tokens` (FCM), `mq2_readings`, `climate_readings`, `motion_events`, `safety_events` (chỉ ghi khi đổi), `device_states` (chỉ ghi khi đổi), `device_health`, `device_config` (1 dòng), `device_command_logs`, `alerts`. Bản tin retained gửi lại khi kết nối lại broker không tạo dòng trùng.
+`users`, `refresh_tokens` (SHA-256), `push_tokens` (FCM), `mq135_readings`, `climate_readings`, `motion_events`, `safety_events` (chỉ ghi khi đổi), `device_states` (chỉ ghi khi đổi), `device_health`, `device_config` (1 dòng), `device_command_logs`, `alerts`. Bản tin retained gửi lại khi kết nối lại broker không tạo dòng trùng.
