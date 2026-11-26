@@ -133,14 +133,35 @@ struct TempHistory {
 // ------------------------------------------------------------------
 // heatKnown = false khi DHT11 hỏng: không biết nhiệt độ. Nếu đang "fire" thì GIỮ "fire"
 // (cảm biến có thể hỏng chính vì cháy) — tránh hạ xuống gas_danger rồi bật quạt thổi thêm oxy.
+// cameraFire: camera (YOLO lửa / khói) đang thấy LỬA — tính là bằng chứng "nóng" như nhiệt độ cao:
+//   MQ135 có khói + camera thấy lửa => fire (tắt quạt) dù DHT11 ở xa đám cháy chưa thấy nóng.
+//   Chỉ camera thấy lửa (MQ135 bình thường) KHÔNG đổi trạng thái — tầng luật ai-agent cảnh báo + bật đèn.
+//   Camera thấy KHÓI không tính (hơi sương của máy phun / hơi nước dễ bị nhận nhầm là khói).
 inline SafetyState computeTarget(MqLevel mq, bool heatKnown, bool tempHot, bool tempRising,
-                                 SafetyState current) {
+                                 SafetyState current, bool cameraFire = false) {
   if (mq < MQ_WARNING) return SAFE_NORMAL;
-  bool heat = heatKnown ? (tempHot || tempRising) : (current == SAFE_FIRE);
+  bool heat = cameraFire || (heatKnown ? (tempHot || tempRising) : (current == SAFE_FIRE));
   if (heat)            return SAFE_FIRE;
   if (mq == MQ_DANGER) return SAFE_GAS_DANGER;
   return SAFE_GAS;
 }
+
+// Camera thấy lửa (warehouse/sensor/camera, service vision trên laptop). Bằng chứng tự HẾT HẠN sau ttlMs
+// kể từ bản tin cuối (vision gửi 5s/lần) — vision chết / mất mạng thì ESP32 quay về chỉ dùng cảm biến của mình.
+struct CameraFireTracker {
+  bool     fire = false;
+  bool     seen = false;
+  uint32_t lastMsg = 0;
+
+  // fireField: 1 = "fire":true, 0 = "fire":false, -1 = không có trường fire / có "error" (không biết)
+  void onMessage(int fireField, uint32_t now) {
+    seen = true; lastMsg = now;
+    fire = (fireField == 1);
+  }
+  bool active(uint32_t now, uint32_t ttlMs) const {
+    return seen && fire && (now - lastMsg) < ttlMs;
+  }
+};
 
 // Lên mức nguy hiểm hơn: NGAY. Xuống mức thấp hơn: chỉ khi mức mới giữ liên tục holdMs.
 struct SafetyTracker {

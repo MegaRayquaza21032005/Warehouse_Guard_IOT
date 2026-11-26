@@ -1,0 +1,9 @@
+{
+  "additionalFiles": "../..,../..,../..,../..",
+  "compiler.optimization_flags": "-Os",
+  "customBuildProperties": "",
+  "fqbn": "esp32:esp32:esp32",
+  "hardwareFolders": "/home/nguyen-thanh-dat/.arduino15/packages/esp32/hardware/esp32/3.3.12,/home/nguyen-thanh-dat/.arduino15/packages/esp32/hardware/esp32/3.3.12",
+  "otherLibrariesFolders": "/home/nguyen-thanh-dat/Arduino/libraries",
+  "sketchLocation": "/home/nguyen-thanh-dat/Documents/Project_IOT/firmware/warehouse_monitor"
+}

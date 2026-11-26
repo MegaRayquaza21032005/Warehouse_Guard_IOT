@@ -41,6 +41,7 @@
 #define MQ135_HYSTERESIS_RAW      150
 #define TEMP_HUM_HYSTERESIS     2.0f
 #define SAFETY_EXIT_HOLD_MS     120000UL  // hết nguy hiểm liên tục 2 phút mới hạ trạng thái
+#define CAMERA_FIRE_TTL_MS      15000UL   // "camera thấy lửa" hết hạn sau 15s không có bản tin sensor/camera
 #define HUM_FAN_LOCK_MS         3600000UL // tạm dừng luật "ẩm -> quạt" 60 phút khi không hiệu quả
 #define TEMP_HISTORY_SAMPLE_MS  30000UL   // lấy mẫu nhiệt độ cho phát hiện tăng nhanh
 

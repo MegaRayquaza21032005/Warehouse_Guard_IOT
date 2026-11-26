@@ -6,6 +6,16 @@ Nhận từng bản tin MQTT (đẩy tới, không polling) + nhịp tick mỗi 
 ESP32 đã tự đánh giá an toàn (status/safety: normal | gas | gas_danger | fire, có hysteresis và giữ
 2 phút trước khi hạ mức). Tầng luật phản ứng khi trạng thái đó đổi, và tự lo những gì ESP32 không biết:
 giờ làm việc, mất kết nối, thiết bị không phản hồi, nóng/ẩm kéo dài, chống spam cảnh báo.
+
+Phát hiện người = PIR (chuyển động) BỔ SUNG camera YOLO (service vision, warehouse/sensor/camera): một trong
+hai báo là đủ mở sự cố đột nhập / báo cháy có người; camera thấy người sau PIR -> thêm cảnh báo xác nhận.
+Camera không bao giờ làm hạ mức hay chặn cảnh báo của PIR.
+
+Lửa / khói từ camera (model YOLO lửa / khói, cùng bản tin sensor/camera) — đã chốt với người dùng 2026-11-26:
+- Camera thấy LỬA + MQ135 có khói: ESP32 tự chuyển `fire` (subscribe thẳng sensor/camera) -> cảnh báo `fire`
+  như thường. Tầng luật chỉ tự báo `camera_fire` nếu ESP32 không chuyển `fire` sau CAMERA_FIRE_ESP_GRACE_S.
+- Chỉ camera thấy LỬA (MQ135 bình thường): `camera_fire` critical + bật đèn, KHÔNG đụng quạt / phun sương.
+- Camera thấy KHÓI: `camera_smoke` warning (không đụng thiết bị; bỏ qua nếu MQ135 đã báo khí / đang thấy lửa).
 """
 
 from collections import deque
@@ -31,6 +41,8 @@ WINDOW_S = 3600            # bộ đệm 60 phút
 MOTION_RECENT_S = 120      # chuyển động trong 2 phút gần nhất = "có người"
 LIGHT_REFRESH_S = 60       # chuyển động tiếp tục -> gửi lại lệnh bật đèn tối đa 1 lần / phút
 VENT_COOLDOWN_S = 3600
+CAMERA_FIRE_ESP_GRACE_S = 5   # camera thấy lửa khi MQ135 đang có khói: chờ ESP32 tự chuyển "fire" tối đa N giây
+CAMERA_CLEAR_S = 120          # camera hết lửa / khói liên tục N giây -> đóng sự cố camera (như ESP32 giữ 2 phút)
 ENV_HYSTERESIS = 2.0
 
 
@@ -62,6 +74,8 @@ class Incident:
     worst_state: str | None = None
     people_alerted: bool = False
     mist_max_alerted: bool = False
+    camera_confirmed: bool = False       # đột nhập: camera đã thấy người (đã báo xác nhận)
+    camera_fire_alerted: bool = False    # sự cố camera: đã báo camera_fire (lửa chập chờn không báo lại)
 
 
 class RuleEngine:
@@ -82,6 +96,24 @@ class RuleEngine:
         self.motion = False
         self.last_motion_at: float | None = None
         self.last_light_cmd_at: float | None = None
+
+        # Camera (service vision): có người / số người / lỗi / trực tuyến
+        self.camera_person = False
+        self.camera_count = 0
+        self.camera_conf: float | None = None
+        self.last_person_at: float | None = None
+        self.camera_online: bool | None = None
+        self.camera_error: str | None = None
+        # Lửa / khói từ camera (None = vision không có model lửa / khói)
+        self.camera_fire_enabled = False
+        self.camera_fire = False
+        self.camera_fire_conf: float | None = None
+        self.camera_smoke = False
+        self.camera_smoke_conf: float | None = None
+        self.camera_fire_pending_since: float | None = None    # chờ ESP32 chuyển fire
+        self.camera_smoke_since: float | None = None
+        self.camera_hazard_at: float | None = None             # lần cuối camera thấy lửa / khói
+        self.esp_camera_fire = False                           # status/safety.cameraFire (ESP32 đang dùng)
 
         self.climate: deque[tuple[float, float, float]] = deque()   # (ts, temp, hum)
         self.mq135: deque[tuple[float, int]] = deque()
@@ -108,7 +140,9 @@ class RuleEngine:
             return acts
         _, group, name = parts
 
-        if group == "sensor":
+        if group == "sensor" and name == "camera":
+            self._on_camera(data, now, acts)          # không phải dữ liệu ESP32 -> không tính vào "mất dữ liệu"
+        elif group == "sensor":
             self._on_data(now, acts)
             if name == "mq135" and isinstance(data.get("raw"), (int, float)):
                 self.mq135.append((now, int(data["raw"])))
@@ -121,6 +155,8 @@ class RuleEngine:
                 self._on_safety(data, now, acts)
             elif name == "online":
                 self._on_online(data.get("status") == "online", now, acts)
+            elif name == "camera":
+                self._on_camera_online(data.get("status") == "online", now, acts)
             elif name == "config" and "error" not in data:
                 self.device_config = dict(data)
                 for k in ("tempHigh", "humHigh"):
@@ -169,11 +205,36 @@ class RuleEngine:
                             key=f"device_no_response:{device}",
                             details={"device": device, "trace_id": trace, "source": source})
 
-        # Hết chuyển động đủ lâu (hoặc đã vào giờ làm) -> đóng sự cố đột nhập
+        # Camera thấy lửa khi MQ135 có khói mà ESP32 không chuyển "fire" (firmware cũ / không nhận được bản tin)
+        if (self.camera_fire_pending_since is not None
+                and now - self.camera_fire_pending_since >= CAMERA_FIRE_ESP_GRACE_S):
+            self.camera_fire_pending_since = None
+            if self.camera_fire and self.safety != "fire":
+                self._camera_fire_alert(now, acts, esp_missed=True)
+
+        # Camera thấy khói giữ đủ GAS_CONFIRM_S mới cảnh báo (như khí MQ135)
+        if (self.camera_smoke and self.camera_smoke_since is not None
+                and now - self.camera_smoke_since >= self.cfg.gas_confirm_s):
+            self.camera_smoke_since = None
+            if not self.camera_fire and self.safety == "normal":
+                inc = self._open_or_update("vision", "warning", "smoke", now, {"event": "camera_smoke"}, acts)
+                self._alert(acts, now, "camera_smoke", "warning",
+                            "Camera phát hiện KHÓI trong kho (cảm biến MQ135 chưa báo — khói có thể chưa tới cảm "
+                            "biến, hoặc là hơi nước / bụi). Xem camera trực tiếp để kiểm tra.",
+                            incident=inc, details=self._camera_hazard_details())
+
+        # Camera không còn thấy lửa / khói đủ lâu -> đóng sự cố camera
+        inc = self.incidents.get("vision")
+        if (inc and not self.camera_fire and not self.camera_smoke and self.camera_hazard_at is not None
+                and now - self.camera_hazard_at >= CAMERA_CLEAR_S):
+            self._close(inc, now, acts, "Camera không còn thấy lửa / khói.")
+
+        # Hết chuyển động VÀ camera không còn thấy người đủ lâu (hoặc đã vào giờ làm) -> đóng sự cố đột nhập
         inc = self.incidents.get("intrusion")
-        if inc and not self.motion and self.last_motion_at is not None and (
-                now - self.last_motion_at >= self.cfg.intrusion_clear_s or self.schedule.is_work_time(now)):
-            self._close(inc, now, acts, "Không còn chuyển động trong kho.")
+        last = max((t for t in (self.last_motion_at, self.last_person_at) if t is not None), default=None)
+        if inc and not self.motion and not self.camera_person and last is not None and (
+                now - last >= self.cfg.intrusion_clear_s or self.schedule.is_work_time(now)):
+            self._close(inc, now, acts, "Không còn chuyển động / người trong kho.")
         return acts
 
     # ================================================================== xử lý từng loại
@@ -217,22 +278,176 @@ class RuleEngine:
         if not motion:
             return
         self.last_motion_at = now
+        self._on_presence("pir", now, acts)
 
-        # Đang nghi cháy mà có chuyển động -> có thể có người trong kho
+    def _on_camera(self, data: dict[str, Any], now: float, acts: list[Action]) -> None:
+        err = data.get("error")
+        if isinstance(err, str) and err:
+            self.camera_person, self.camera_count = False, 0
+            self._reset_camera_hazard(now)
+            if self.camera_error != err:
+                self.camera_error = err
+                self._alert(acts, now, "camera_fault", "warning",
+                            "Camera không có hình (bị che, rút cáp hoặc ứng dụng khác đang dùng) — phát hiện người "
+                            "chỉ còn dựa vào cảm biến chuyển động PIR.", key="camera_fault", details={"error": err})
+            return
+        person = data.get("person")
+        if not isinstance(person, bool):
+            return
+        if self.camera_error:
+            log.info("Camera có hình trở lại")
+            self.camera_error = None
+        count = data.get("personCount")
+        self.camera_count = int(count) if person and isinstance(count, (int, float)) and count > 0 else int(person)
+        self.camera_conf = _num(data.get("personConf")) if person else None
+        prev, self.camera_person = self.camera_person, person
+        if person and not prev:
+            log.info("Camera thấy %d người", self.camera_count)
+        if person:
+            self.last_person_at = now
+            self._on_presence("camera", now, acts)
+        if isinstance(data.get("fire"), bool) and isinstance(data.get("smoke"), bool):
+            self.camera_fire_enabled = True
+            self._on_camera_hazard(data["fire"], _num(data.get("fireConf")), data["smoke"],
+                                   _num(data.get("smokeConf")), now, acts)
+
+    def _on_camera_hazard(self, fire: bool, fire_conf: float | None, smoke: bool, smoke_conf: float | None,
+                          now: float, acts: list[Action]) -> None:
+        prev_fire, prev_smoke = self.camera_fire, self.camera_smoke
+        self.camera_fire, self.camera_fire_conf = fire, fire_conf if fire else None
+        self.camera_smoke, self.camera_smoke_conf = smoke, smoke_conf if smoke else None
+        if fire or smoke:
+            self.camera_hazard_at = now
+        if smoke and not prev_smoke:
+            log.warning("Camera thấy KHÓI (%.2f)", smoke_conf or 0)
+            self.camera_smoke_since = now
+        elif not smoke:
+            self.camera_smoke_since = None
+            if prev_smoke:
+                log.info("Camera hết thấy khói")
+
+        if not fire:
+            self.camera_fire_pending_since = None
+            if prev_fire:
+                log.info("Camera hết thấy lửa")
+            return
+        if not prev_fire:
+            log.warning("Camera thấy LỬA (%.2f) — an toàn ESP32: %s", fire_conf or 0, self.safety)
+            if self.safety == "fire":
+                inc = self.incidents.get("safety")
+                if inc:     # đã báo cháy (cảm biến) -> chỉ ghi diễn biến, không báo trùng
+                    self._open_or_update("safety", "critical", "fire", now, {"event": "camera_fire"}, acts)
+            elif self.safety in ("gas", "gas_danger") and self.online is not False:
+                # MQ135 có khói + camera thấy lửa -> ESP32 sẽ tự chuyển "fire" (tắt quạt, phun sương). Chờ một chút
+                # để báo một lần ("fire") thay vì hai cảnh báo critical liền nhau.
+                self.camera_fire_pending_since = now
+            else:
+                self._camera_fire_alert(now, acts)
+        if self.safety != "fire" and (not prev_fire or self.last_light_cmd_at is None
+                                      or now - self.last_light_cmd_at >= LIGHT_REFRESH_S):
+            # Đèn: camera vừa thấy lửa -> bật NGAY (ESP32 tự bật khi "fire"); làm mới mỗi phút khi lửa còn
+            self.last_light_cmd_at = now
+            acts.append(Command("light", {"state": "on", "source": "rule", "reason": "camera_fire",
+                                          "duration_s": self.cfg.light_on_s, "trace_id": f"rule-{self.new_id()}"}))
+
+    def _camera_fire_alert(self, now: float, acts: list[Action], esp_missed: bool = False) -> None:
+        inc = self._open_or_update("vision", "critical", "fire", now, {"event": "camera_fire"}, acts)
+        if inc.camera_fire_alerted:      # lửa chập chờn trong cùng sự cố -> chỉ ghi diễn biến (đã báo critical)
+            log.info("Camera thấy lửa lại (sự cố %s đã báo) — không báo trùng", inc.id)
+            return
+        inc.camera_fire_alerted = True
+        pir, cam = self._people(now)
+        n = max(1, self.camera_count)
+        people = (f" Camera đang thấy {n} người trong kho — kiểm tra và sơ tán ngay." if self.camera_person else
+                  f" Camera vừa thấy {n} người trong kho (trong 2 phút) — kiểm tra và sơ tán ngay." if cam else
+                  " Vừa có chuyển động — có thể có người trong kho." if pir else "")
+        if esp_missed:
+            body = ("Camera phát hiện LỬA và cảm biến MQ135 đang báo khói, nhưng ESP32 CHƯA chuyển sang trạng thái "
+                    "cháy (quạt có thể vẫn chạy). Tắt quạt và kiểm tra kho ngay.")
+        else:
+            body = ("Camera phát hiện LỬA trong kho (cảm biến khói / nhiệt chưa báo). Đã bật đèn; quạt và phun sương "
+                    "KHÔNG tự đổi — xem camera trực tiếp, cháy thật thì bật phun sương / gọi cứu hỏa.")
+        d = self._camera_hazard_details()
+        d.update(self._people_details(now))
+        self._alert(acts, now, "camera_fire", "critical", body + people, incident=inc, details=d)
+
+    def _camera_hazard_details(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"evidence": ["camera"], "camera_fire": self.camera_fire,
+                             "camera_smoke": self.camera_smoke}
+        if self.camera_fire_conf is not None:
+            d["fire_conf"] = self.camera_fire_conf
+        if self.camera_smoke_conf is not None:
+            d["smoke_conf"] = self.camera_smoke_conf
+        return d
+
+    def _reset_camera_hazard(self, now: float) -> None:
+        """Camera lỗi / vision mất kết nối: không còn biết có lửa / khói hay không."""
+        if self.camera_fire or self.camera_smoke:
+            log.info("Mất hình camera — bỏ trạng thái lửa / khói từ camera")
+        self.camera_fire = self.camera_smoke = False
+        self.camera_fire_conf = self.camera_smoke_conf = None
+        self.camera_fire_pending_since = self.camera_smoke_since = None
+
+    def _on_camera_online(self, online: bool, now: float, acts: list[Action]) -> None:
+        prev, self.camera_online = self.camera_online, online
+        if online:
+            if prev is False:
+                log.info("Camera / service vision kết nối lại")
+            return
+        self.camera_person, self.camera_count = False, 0
+        self._reset_camera_hazard(now)
+        if prev is True:     # chỉ báo khi đang chạy mà mất (không báo lúc ai-agent khởi động thấy retained offline)
+            self._alert(acts, now, "camera_offline", "warning",
+                        "Camera / service nhận dạng người mất kết nối — phát hiện người chỉ còn dựa vào cảm biến "
+                        "chuyển động PIR.", key="camera_offline")
+
+    def _people(self, now: float) -> tuple[bool, bool]:
+        """(PIR có chuyển động gần đây, camera đang / vừa thấy người)."""
+        pir = self.motion or (self.last_motion_at is not None and now - self.last_motion_at <= MOTION_RECENT_S)
+        cam = self.camera_person or (self.last_person_at is not None and now - self.last_person_at <= MOTION_RECENT_S)
+        return pir, cam
+
+    def _people_details(self, now: float) -> dict[str, Any]:
+        pir, cam = self._people(now)
+        d: dict[str, Any] = {"evidence": [e for e, ok in (("pir", pir), ("camera", cam)) if ok]}
+        if cam:
+            d["person_count"] = max(1, self.camera_count)
+        return d
+
+    def _on_presence(self, via: str, now: float, acts: list[Action]) -> None:
+        """PIR có chuyển động hoặc camera thấy người (via = "pir" | "camera")."""
+        pir, cam = self._people(now)
+        n = max(1, self.camera_count)
+
+        # Đang nghi cháy mà có người -> có thể có người trong kho
         safety_inc = self.incidents.get("safety")
         if self.safety == "fire" and safety_inc and not safety_inc.people_alerted:
             safety_inc.people_alerted = True
-            self._alert(acts, now, "fire_people", "critical",
-                        "NGHI CHÁY VÀ CÓ THỂ CÓ NGƯỜI TRONG KHO (vừa phát hiện chuyển động). "
-                        "Kiểm tra và sơ tán ngay.", incident=safety_inc)
+            head = (f"NGHI CHÁY VÀ CÓ NGƯỜI TRONG KHO (camera thấy {n} người)" if cam
+                    else "NGHI CHÁY VÀ CÓ THỂ CÓ NGƯỜI TRONG KHO (vừa phát hiện chuyển động)")
+            self._alert(acts, now, "fire_people", "critical", f"{head}. Kiểm tra và sơ tán ngay.",
+                        incident=safety_inc, details=self._people_details(now))
 
         if self.schedule.is_work_time(now):
             return
         inc = self.incidents.get("intrusion")
         if inc is None:
-            inc = self._open_or_update("intrusion", "critical", "motion", now, {"event": "motion"}, acts)
-            self._alert(acts, now, "intrusion", "critical",
-                        "Phát hiện chuyển động NGOÀI GIỜ LÀM VIỆC trong kho. Đã bật đèn.", incident=inc)
+            inc = self._open_or_update("intrusion", "critical", "motion" if via == "pir" else "person", now,
+                                       {"event": "motion" if via == "pir" else "person"}, acts)
+            inc.camera_confirmed = cam
+            if via == "camera":
+                msg = f"Camera phát hiện {n} người NGOÀI GIỜ LÀM VIỆC trong kho" + (
+                    " (cảm biến chuyển động cũng báo)" if pir else "") + ". Đã bật đèn."
+            else:
+                msg = "Phát hiện chuyển động NGOÀI GIỜ LÀM VIỆC trong kho" + (
+                    f" — camera thấy {n} người" if cam else "") + ". Đã bật đèn."
+            self._alert(acts, now, "intrusion", "critical", msg, incident=inc, details=self._people_details(now))
+        elif via == "camera" and not inc.camera_confirmed:
+            inc.camera_confirmed = True
+            self._open_or_update("intrusion", "critical", "person", now, {"event": "camera_confirmed"}, acts)
+            self._alert(acts, now, "intrusion_confirmed", "critical",
+                        f"Camera XÁC NHẬN có {n} người trong kho ngoài giờ làm việc (cảm biến chuyển động đã báo "
+                        "trước đó). Kiểm tra ngay.", incident=inc, details=self._people_details(now))
         if self.last_light_cmd_at is None or now - self.last_light_cmd_at >= LIGHT_REFRESH_S:
             self.last_light_cmd_at = now
             acts.append(Command("light", {"state": "on", "source": "rule", "reason": "motion_after_hours",
@@ -246,6 +461,10 @@ class RuleEngine:
         for f in sorted(self.faults - faults):
             log.info("Lỗi cảm biến %s đã hết", f)
         self.faults = faults
+        cam_fire = data.get("cameraFire") is True
+        if cam_fire != self.esp_camera_fire:
+            log.info("ESP32 %s dùng 'camera thấy lửa' khi đánh giá an toàn", "đang" if cam_fire else "thôi")
+        self.esp_camera_fire = cam_fire
 
         state = data.get("state")
         if state not in SAFETY_RANK or state == self.safety:
@@ -263,12 +482,23 @@ class RuleEngine:
         level = "warning" if state == "gas" else "critical"
         inc = self._open_or_update("safety", level, state, now, {"event": "safety", "from": prev, "to": state}, acts)
         if state == "fire":
-            people = self.motion or (self.last_motion_at is not None and now - self.last_motion_at <= MOTION_RECENT_S)
-            if people:
+            self.camera_fire_pending_since = None      # ESP32 đã chuyển "fire" -> không cần báo camera_fire riêng
+            pir, cam = self._people(now)
+            if pir or cam:
                 inc.people_alerted = True
+                head = (f"NGHI CHÁY VÀ CÓ NGƯỜI TRONG KHO (camera thấy {max(1, self.camera_count)} người)" if cam
+                        else "NGHI CHÁY VÀ CÓ THỂ CÓ NGƯỜI TRONG KHO (cảm biến chuyển động vừa phát hiện)")
+                d = self._people_details(now)
+                if cam_fire:
+                    d["camera_fire"] = True
                 self._alert(acts, now, "fire_people", "critical",
-                            "NGHI CHÁY VÀ CÓ THỂ CÓ NGƯỜI TRONG KHO (cảm biến chuyển động vừa phát hiện). "
-                            "Quạt đã tắt, phun sương và đèn đã bật. Kiểm tra và sơ tán ngay.", incident=inc)
+                            f"{head}{' — camera thấy lửa' if cam_fire else ''}. Quạt đã tắt, phun sương và đèn đã "
+                            "bật. Kiểm tra và sơ tán ngay.", incident=inc, details=d)
+            elif cam_fire:
+                self._alert(acts, now, "fire", "critical",
+                            "NGHI CHÁY: camera thấy LỬA và cảm biến MQ135 báo khói. Quạt đã tắt, phun sương và đèn "
+                            "đã bật. Kiểm tra kho ngay.", incident=inc,
+                            details={**self._camera_hazard_details(), "evidence": ["mq135", "camera"]})
             else:
                 self._alert(acts, now, "fire", "critical",
                             "NGHI CHÁY: khói / khí kèm nhiệt độ cao hoặc tăng nhanh. Quạt đã tắt, phun sương và "
@@ -358,7 +588,7 @@ class RuleEngine:
         minutes = max(1, round((now - inc.opened_at) / 60))
         acts.append(IncidentEvent("close", inc.id, inc.kind, inc.level, "closed", now, {"event": "close"}))
         label = {"safety": f"sự cố {inc.worst_state or inc.state}", "intrusion": "sự cố đột nhập",
-                 "offline": "mất kết nối"}.get(inc.kind, inc.kind)
+                 "offline": "mất kết nối", "vision": "camera thấy lửa / khói"}.get(inc.kind, inc.kind)
         self._alert(acts, now, "recovered", "info", f"Đã trở lại bình thường sau {minutes} phút ({label}). {reason}",
                     key=f"recovered:{inc.id}", incident=inc, details={"duration_min": minutes, "kind": inc.kind})
 
@@ -387,6 +617,9 @@ class RuleEngine:
         return {
             "safety": self.safety, "faults": sorted(self.faults), "online": self.online,
             "lastDataAgoS": None, "motion": self.motion, "thresholds": self.thresholds,
+            "camera": {"online": self.camera_online, "person": self.camera_person, "count": self.camera_count,
+                       "error": self.camera_error, "fireEnabled": self.camera_fire_enabled,
+                       "fire": self.camera_fire, "smoke": self.camera_smoke, "espCameraFire": self.esp_camera_fire},
             "hot": self.hot, "humid": self.humid,
             "incidents": {k: {"id": v.id, "level": v.level, "state": v.state, "openedAt": v.opened_at}
                           for k, v in self.incidents.items()},

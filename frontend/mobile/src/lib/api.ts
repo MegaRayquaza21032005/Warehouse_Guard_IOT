@@ -7,6 +7,8 @@ import { Platform } from 'react-native'
 import type {
   Alert,
   AlertLevel,
+  CameraSnapshot,
+  CameraStatus,
   CommandSource,
   DeviceConfig,
   DeviceLog,
@@ -268,6 +270,20 @@ export const memoriesApi = {
 export const schedulesApi = {
   list: () => request<ScheduledCommand[]>('/api/schedules'),
   cancel: (id: string) => request(`/api/schedules/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+}
+
+/**
+ * Camera (service vision qua Java BE). Image của React Native không gửi được header → URL mang access token trong
+ * query (backend chỉ chấp nhận cho GET /api/camera/*). App lấy ảnh hiện tại liên tục thay cho MJPEG (Image của
+ * React Native không hiển thị được multipart/x-mixed-replace).
+ */
+export const cameraApi = {
+  status: () => request<CameraStatus>('/api/camera/status'),
+  snapshots: (q: { alertId?: number; incidentId?: string; limit?: number } = {}) =>
+    request<CameraSnapshot[]>('/api/camera/snapshots', { query: q }),
+  frameUrl: (n: number) => buildUrl('/api/camera/snapshot', { access_token: session?.accessToken, n }),
+  imageUrl: (id: number) => buildUrl(`/api/camera/snapshots/${id}/image`, { access_token: session?.accessToken }),
+  refreshToken: () => refreshSession(),
 }
 
 export const pushApi = {

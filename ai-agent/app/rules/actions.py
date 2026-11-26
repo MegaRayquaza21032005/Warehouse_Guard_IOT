@@ -23,7 +23,7 @@ class Command:
 class IncidentEvent:
     action: str                   # open | update | close
     incident_id: str
-    kind: str                     # safety | intrusion | offline
+    kind: str                     # safety | intrusion | offline | vision (camera thấy lửa / khói)
     level: str
     state: str | None
     ts: float

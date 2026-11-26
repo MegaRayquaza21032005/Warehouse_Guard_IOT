@@ -2,6 +2,8 @@ import { AlertOctagon, AlertTriangle, Bot, Check, Info, ThumbsDown, ThumbsUp } f
 import type { Alert, AlertLevel } from '../types'
 import { LEVEL_LABEL, alertTypeLabel, fmtAgo, fmtDateTime } from '../lib/labels'
 import { live } from '../lib/live'
+import { useState } from 'react'
+import { Lightbox, SnapshotThumb } from './Snapshot'
 
 export function LevelIcon({ level, size = 17 }: { level: AlertLevel; size?: number }) {
   const Icon = level === 'critical' ? AlertOctagon : level === 'warning' ? AlertTriangle : Info
@@ -13,9 +15,12 @@ export function LevelIcon({ level, size = 17 }: { level: AlertLevel; size?: numb
 }
 
 export default function AlertList({ alerts, compact = false }: { alerts: Alert[]; compact?: boolean }) {
+  const [open, setOpen] = useState<Alert | null>(null)
   if (!alerts.length) return <div className="empty">Không có cảnh báo.</div>
+  const caption = (a: Alert) => `${alertTypeLabel(a.type)} · ${fmtDateTime(a.ts)}`
   return (
     <div>
+      {open?.snapshotId && <Lightbox id={open.snapshotId} caption={caption(open)} onClose={() => setOpen(null)} />}
       {alerts.map((a) => (
         <div key={a.id} className={`alert-item ${a.acknowledgedAt ? '' : 'unacked'} ${compact ? 'compact' : ''}`}>
           <LevelIcon level={a.level} />
@@ -32,6 +37,11 @@ export default function AlertList({ alerts, compact = false }: { alerts: Alert[]
             <div className="msg" style={{ marginTop: 3, fontSize: 13.5 }}>
               {a.message}
             </div>
+            {!compact && a.snapshotId && (
+              <div className="alert-snap">
+                <SnapshotThumb id={a.snapshotId} caption={caption(a)} onOpen={() => setOpen(a)} />
+              </div>
+            )}
             <div className="row">
               <span title={fmtDateTime(a.ts)}>{compact ? fmtAgo(a.ts) : fmtDateTime(a.ts)}</span>
               {a.acknowledgedAt && (

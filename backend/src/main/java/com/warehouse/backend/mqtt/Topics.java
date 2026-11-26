@@ -14,6 +14,10 @@ public final class Topics {
     public static final String SENSOR_MQ135 = "warehouse/sensor/mq135";
     public static final String SENSOR_DHT = "warehouse/sensor/dht11";
     public static final String SENSOR_PIR = "warehouse/sensor/pir";
+    /** Service vision (camera + YOLO): {"person":true,"personCount":1,"personConf":0.87,"fps":9.8} | {"error":...}. */
+    public static final String SENSOR_CAMERA = "warehouse/sensor/camera";
+    /** Retained: {"status":"online","model":"yolo26n.pt","device":"cuda:0"} | {"status":"offline"} (LWT). */
+    public static final String STATUS_CAMERA = "warehouse/status/camera";
     public static final String STATUS_SAFETY = "warehouse/status/safety";
     public static final String STATUS_ONLINE = "warehouse/status/online";
     public static final String STATUS_DEVICE = "warehouse/status/device";

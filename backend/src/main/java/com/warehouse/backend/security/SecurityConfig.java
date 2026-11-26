@@ -13,6 +13,8 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
+import org.springframework.security.oauth2.server.resource.web.BearerTokenResolver;
+import org.springframework.security.oauth2.server.resource.web.DefaultBearerTokenResolver;
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.cors.CorsConfiguration;
@@ -43,6 +45,20 @@ public class SecurityConfig {
                 .addFilterBefore(new InternalApiKeyFilter(props.internalApiKey()),
                         BearerTokenAuthenticationFilter.class);
         return http.build();
+    }
+
+    /**
+     * Access token lấy từ header Authorization. Riêng GET dưới /api/camera/ nhận thêm ?access_token=... vì thẻ
+     * <img> (MJPEG, ảnh chụp) và Image của React Native không gửi được header. API khác KHÔNG nhận token qua URL.
+     */
+    @Bean
+    BearerTokenResolver bearerTokenResolver() {
+        DefaultBearerTokenResolver header = new DefaultBearerTokenResolver();
+        DefaultBearerTokenResolver headerOrQuery = new DefaultBearerTokenResolver();
+        headerOrQuery.setAllowUriQueryParameter(true);
+        return request -> "GET".equals(request.getMethod()) && request.getRequestURI().startsWith("/api/camera/")
+                ? headerOrQuery.resolve(request)
+                : header.resolve(request);
     }
 
     /** Claim "role" (vd. USER) -> quyền ROLE_USER. */

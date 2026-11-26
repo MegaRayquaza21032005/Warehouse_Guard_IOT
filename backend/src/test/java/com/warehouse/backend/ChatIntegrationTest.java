@@ -249,7 +249,7 @@ class ChatIntegrationTest extends IntegrationTestBase {
     @Test
     void agentDownGives503() {
         AppProperties props = new AppProperties("Asia/Ho_Chi_Minh", null, "k", List.of(), null, null,
-                new AppProperties.Agent("http://127.0.0.1:1", Duration.ofSeconds(2)), null);
+                new AppProperties.Agent("http://127.0.0.1:1", Duration.ofSeconds(2)), null, null);
         AgentClient client = new AgentClient(props, new ObjectMapper());
         assertThatThrownBy(() -> client.getJson("/chat/threads", Map.of()))
                 .isInstanceOfSatisfying(ApiException.class, e -> {

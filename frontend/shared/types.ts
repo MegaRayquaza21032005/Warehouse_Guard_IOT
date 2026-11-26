@@ -27,11 +27,39 @@ export interface PirData {
   motion: boolean
 }
 
+/**
+ * `warehouse/sensor/camera` — service vision (camera + YOLO). Gửi 5s/lần + khi có / hết người, lửa, khói.
+ * Lỗi camera: chỉ có `error` (vd. `camera_unavailable`, `detector_failed`).
+ * `fire` / `smoke` không có = vision chưa có model lửa / khói (không biết).
+ */
+export interface CameraData {
+  person?: boolean
+  personCount?: number
+  personConf?: number | null
+  fire?: boolean
+  fireConf?: number | null
+  smoke?: boolean
+  smokeConf?: number | null
+  fps?: number | null
+  error?: string
+}
+
+/** `warehouse/status/camera` (retained, LWT offline). */
+export interface CameraOnline {
+  status: 'online' | 'offline'
+  model?: string
+  /** Model lửa / khói; null = không bật */
+  fireModel?: string | null
+  device?: string
+}
+
 export interface SafetyData {
   state: SafetyState
   mq135Level: Mq135Level
   tempRise: number
   faults: string[]
+  /** ESP32 đang dùng "camera thấy lửa" làm bằng chứng nóng (MQ135 có khói + camera thấy lửa -> fire) */
+  cameraFire?: boolean
 }
 
 export interface DeviceStatus {
@@ -89,9 +117,12 @@ export interface LiveState {
     mq135: Stamped<Mq135Data> | null
     dht11: Stamped<Dht11Data> | null
     pir: Stamped<PirData> | null
+    camera?: Stamped<CameraData> | null
   }
   devices: Record<DeviceName, Stamped<DeviceStatus> | null>
   config: Stamped<DeviceConfig> | null
+  /** Service vision online / offline. */
+  camera?: Stamped<CameraOnline> | null
   brokerConnected?: boolean
   workHours?: WorkHours
 }
@@ -111,6 +142,59 @@ export interface Alert {
   feedback: 'true_alarm' | 'false_alarm' | null
   feedbackNote: string | null
   details: Record<string, unknown>
+  /** Ảnh camera chụp lúc có cảnh báo (đột nhập / cháy có người) — `GET /api/camera/snapshots/{id}/image`. */
+  snapshotId?: number | null
+}
+
+/** `GET /api/camera/snapshots` — ảnh chụp khi có sự cố (không kèm dữ liệu ảnh). */
+export interface CameraSnapshot {
+  id: number
+  ts: string
+  alertId: number | null
+  alertType: string | null
+  incidentId: string | null
+  personCount: number | null
+  contentType: string
+  sizeBytes: number
+}
+
+/** `GET /api/camera/status` — bản tin MQTT mới nhất + chi tiết từ service vision (nếu đang chạy). */
+export interface CameraStatus {
+  online: Stamped<CameraOnline> | null
+  detection: Stamped<CameraData> | null
+  reachable: boolean
+  error?: string
+  service: {
+    uptimeS: number
+    camera: { source: string; opened: boolean; error: string | null; width: number | null; height: number | null } | null
+    model: {
+      name: string
+      device: string
+      half: boolean
+      imgsz: number
+      conf: number
+      inferFps: number
+      /** Model lửa / khói: null = tắt; có `error` = không nạp được */
+      fire?: { name: string; fireConf?: number; smokeConf?: number; confirmFrames?: number; clearS?: number; error?: string } | null
+    }
+    detection: {
+      person: boolean
+      personCount: number
+      personConf: number | null
+      detections: number
+      fps: number | null
+      inferMs: number | null
+      frames: number
+      error: string | null
+      fireEnabled?: boolean
+      fire?: boolean
+      fireConf?: number | null
+      smoke?: boolean
+      smokeConf?: number | null
+    }
+    mqttConnected: boolean
+    viewers: number
+  } | null
 }
 
 /** `GET /api/device-logs`. `result` = null: chưa có xác nhận (luật cục bộ ESP32 thì không cần). */

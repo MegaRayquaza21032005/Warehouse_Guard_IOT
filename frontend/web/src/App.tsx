@@ -12,6 +12,7 @@ import Stats from './pages/Stats'
 import DeviceLogs from './pages/DeviceLogs'
 import Chat from './pages/Chat'
 import Settings from './pages/Settings'
+import Camera from './pages/Camera'
 
 export default function App() {
   const [user, setUser] = useState<User | null>(() => auth.current())
@@ -51,6 +52,7 @@ export default function App() {
           <Route element={<Layout />}>
             <Route index element={<Dashboard />} />
             <Route path="alerts" element={<Alerts />} />
+            <Route path="camera" element={<Camera />} />
             <Route path="stats" element={<Stats />} />
             <Route path="device-logs" element={<DeviceLogs />} />
             <Route path="chat" element={<Chat />} />

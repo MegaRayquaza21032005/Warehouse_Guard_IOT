@@ -44,3 +44,7 @@ frontend/mobile/ios/build/
 .DS_Store
 Thumbs.db
 *.log
+
+# ===== Vision: model YOLO (tự tải lại khi chạy) =====
+vision/models/*
+!vision/models/.gitkeep

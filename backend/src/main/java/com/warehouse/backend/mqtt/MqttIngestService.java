@@ -19,6 +19,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import com.warehouse.backend.alert.AlertRepository;
+import com.warehouse.backend.camera.CameraService;
 import com.warehouse.backend.push.PushService;
 import com.warehouse.backend.auth.UserRepository;
 import com.warehouse.backend.device.CommandLogRepository;
@@ -53,10 +54,11 @@ public class MqttIngestService {
     private final LiveStateService live;
     private final LiveBroadcaster broadcaster;
     private final PushService push;
+    private final CameraService camera;
 
     public MqttIngestService(ObjectMapper mapper, TelemetryRepository telemetry, CommandLogRepository commandLogs,
             AlertRepository alerts, UserRepository users, LiveStateService live, LiveBroadcaster broadcaster,
-            PushService push) {
+            PushService push, CameraService camera) {
         this.mapper = mapper;
         this.telemetry = telemetry;
         this.commandLogs = commandLogs;
@@ -65,6 +67,7 @@ public class MqttIngestService {
         this.live = live;
         this.broadcaster = broadcaster;
         this.push = push;
+        this.camera = camera;
     }
 
     public void handle(String topic, byte[] payload, boolean retained) {
@@ -85,6 +88,7 @@ public class MqttIngestService {
             case Topics.SENSOR_MQ135 -> onMq135(data);
             case Topics.SENSOR_DHT -> onDht(data);
             case Topics.SENSOR_PIR -> onPir(data);
+            case Topics.SENSOR_CAMERA -> camera.onReading(data);
             case Topics.STATUS_SAFETY -> onSafety(data);
             case Topics.STATUS_ONLINE -> telemetry.insertHealth("online".equals(str(data, "status")), null, null, null);
             case Topics.STATUS_DEVICE -> telemetry.insertHealth(true, longVal(data, "uptime"),
@@ -205,6 +209,7 @@ public class MqttIngestService {
                 toJson(d));
         Map<String, Object> saved = alerts.find(id).orElse(d);
         push.onAlert(saved);
+        camera.onAlert(id, type, str(d, "incident_id"), obj(d, "details"));   // đột nhập / cháy có người -> chụp ảnh
         return saved;
     }
 

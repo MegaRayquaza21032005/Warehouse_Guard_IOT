@@ -33,6 +33,7 @@ static const char* T_DEVICE     = "warehouse/status/device";
 static const char* T_CONFIG     = "warehouse/status/config";
 static const char* T_SAFETY     = "warehouse/status/safety";
 static const char* T_CMD_CONFIG = "warehouse/cmd/config";
+static const char* T_CAMERA     = "warehouse/sensor/camera";   // service vision (YOLO lửa / khói) — chỉ đọc "fire"
 
 static const char* ONLINE_MSG   = "{\"status\":\"online\"}";
 static const char* OFFLINE_MSG  = "{\"status\":\"offline\"}";
@@ -95,6 +96,10 @@ uint8_t faults = 0;
 bool        safetyPublished = false;
 SafetyState pubSafety = SAFE_NORMAL;
 uint8_t     pubFaults = 0;
+bool        pubCameraFire = false;
+
+CameraFireTracker cameraFire;
+bool cameraFireNow = false;   // giá trị dùng ở lần tính trạng thái gần nhất
 
 unsigned long lastMq135Read = 0, lastDhtRead = 0, lastHistSample = 0, lastSensorPublish = 0;
 unsigned long lastDeviceStatus = 0, lastWifiRetry = 0, lastMqttRetry = 0, lastRelaySwitch = 0;
@@ -214,6 +219,7 @@ void publishDht() {
     doc["temp"]     = serialized(String(temperature, 1));
     doc["hum"]      = serialized(String(humidity, 1));
     doc["tempRise"] = serialized(String(tempRise, 1));
+  doc["cameraFire"] = cameraFireNow;
   } else {
     doc["error"]     = "read_failed";
     doc["failCount"] = dhtFailCount;
@@ -232,12 +238,13 @@ void publishSafety() {
   doc["state"]    = safetyStr(safety.state);
   doc["mq135Level"] = mqLevelStr(mqLevel);
   doc["tempRise"] = serialized(String(tempRise, 1));
+  doc["cameraFire"] = cameraFireNow;
   JsonArray arr = doc["faults"].to<JsonArray>();
   if (faults & FAULT_MQ135_DISCONNECTED) arr.add("mq135_disconnected");
   if (faults & FAULT_MQ135_SATURATED)    arr.add("mq135_saturated");
   if (faults & FAULT_DHT_FAILED)       arr.add("dht_failed");
   if (publishJson(T_SAFETY, doc, true)) {
-    safetyPublished = true; pubSafety = safety.state; pubFaults = faults;
+    safetyPublished = true; pubSafety = safety.state; pubFaults = faults; pubCameraFire = cameraFireNow;
   }
 }
 
@@ -368,12 +375,17 @@ void updateSafety(unsigned long now) {
   const bool heatKnown  = !dhtFaulted() && !isnan(temperature);
   const bool tempRising = heatKnown && tempRise >= cfg.tempRiseC;
   SafetyState prev = safety.state;
-  SafetyState target = computeTarget(mqLevel, heatKnown, tempHot, tempRising, safety.state);
+  const bool camFire = cameraFire.active(now, CAMERA_FIRE_TTL_MS);
+  if (camFire != cameraFireNow) Serial.printf("[CAMERA] fire=%s\n", camFire ? "true" : "false");
+  cameraFireNow = camFire;
+  SafetyState target = computeTarget(mqLevel, heatKnown, tempHot, tempRising, safety.state, camFire);
   safety.update(target, now, SAFETY_EXIT_HOLD_MS);
   if (safety.state != prev) {
-    Serial.printf("[SAFETY] %s -> %s\n", safetyStr(prev), safetyStr(safety.state));
+    Serial.printf("[SAFETY] %s -> %s%s\n", safetyStr(prev), safetyStr(safety.state),
+                  (safety.state == SAFE_FIRE && camFire) ? " (camera thay lua)" : "");
   }
-  if (!safetyPublished || safety.state != pubSafety || faults != pubFaults) publishSafety();
+  if (!safetyPublished || safety.state != pubSafety || faults != pubFaults || cameraFireNow != pubCameraFire)
+    publishSafety();
 }
 
 void updateDevices(unsigned long now) {
@@ -465,6 +477,13 @@ void onMqttMessage(char* topic, byte* payload, unsigned int len) {
     return;
   }
   if (strcmp(topic, T_CMD_CONFIG) == 0) { handleConfigCmd(doc); return; }
+  if (strcmp(topic, T_CAMERA) == 0) {
+    // {"fire":true,...} | {"fire":false,...} | {"error":"..."} | không có "fire" (vision chưa có model lửa)
+    JsonVariant f = doc["fire"];
+    int fireField = (!doc["error"].isNull() || !f.is<bool>()) ? -1 : (f.as<bool>() ? 1 : 0);
+    cameraFire.onMessage(fireField, millis());
+    return;
+  }
   for (Device& d : devices) {
     if (strcmp(topic, d.cmdTopic) == 0) { handleDeviceCmd(d, doc); return; }
   }
@@ -486,6 +505,7 @@ void ensureMqtt() {
     Serial.println("[MQTT] connected");
     mqtt.publish(T_ONLINE, ONLINE_MSG, true);
     mqtt.subscribe(T_CMD_CONFIG, 1);
+    mqtt.subscribe(T_CAMERA, 0);
     for (Device& d : devices) { mqtt.subscribe(d.cmdTopic, 1); d.published = false; }
     safetyPublished = false;
     publishConfig();

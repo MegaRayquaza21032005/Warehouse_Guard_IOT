@@ -32,6 +32,7 @@ public class LiveStateService {
         sensors.put("mq135", entry(Topics.SENSOR_MQ135));
         sensors.put("dht11", entry(Topics.SENSOR_DHT));
         sensors.put("pir", entry(Topics.SENSOR_PIR));
+        sensors.put("camera", entry(Topics.SENSOR_CAMERA));
 
         Map<String, Object> devices = new LinkedHashMap<>();
         for (String d : Topics.DEVICES) {
@@ -45,10 +46,12 @@ public class LiveStateService {
         s.put("sensors", sensors);
         s.put("devices", devices);
         s.put("config", entry(Topics.STATUS_CONFIG));
+        s.put("camera", entry(Topics.STATUS_CAMERA));      // service vision online / offline
         return s;
     }
 
-    private Object entry(String topic) {
+    /** {"data": ..., "updatedAt": ...} hoặc null nếu chưa nhận bản tin nào. */
+    public Map<String, Object> entry(String topic) {
         Entry e = latest.get(topic);
         if (e == null) {
             return null;

@@ -5,6 +5,8 @@
 import type {
   Alert,
   AlertLevel,
+  CameraSnapshot,
+  CameraStatus,
   DeviceConfig,
   DeviceLog,
   DeviceName,
@@ -16,7 +18,7 @@ import type {
   StatsResponse,
   TimelineSegment,
 } from '../types'
-import { ApiError, getSession, refreshSession, request, setSession, type User } from './client'
+import { ApiError, buildUrl, getSession, refreshSession, request, setSession, type User } from './client'
 
 export { ApiError, type User }
 
@@ -127,6 +129,24 @@ export const memoriesApi = {
 export const schedulesApi = {
   list: () => request<ScheduledCommand[]>('/api/schedules'),
   cancel: (id: string) => request<void>(`/api/schedules/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+}
+
+// ------------------------------------------------------------------ camera (service vision qua Java BE)
+
+/**
+ * Thẻ <img> không gửi được header Authorization → URL ảnh / MJPEG mang access token trong query
+ * (backend chỉ chấp nhận cách này cho GET /api/camera/*). Token hết hạn → ảnh lỗi → gọi `cameraApi.refreshToken()`
+ * rồi tạo lại URL.
+ */
+export const cameraApi = {
+  status: () => request<CameraStatus>('/api/camera/status'),
+  snapshots: (q: { alertId?: number; incidentId?: string; limit?: number } = {}) =>
+    request<CameraSnapshot[]>('/api/camera/snapshots', { query: q }),
+  streamUrl: (fps = 10, n = 0) => buildUrl('/api/camera/stream', { fps, n, access_token: getSession()?.accessToken }),
+  snapshotUrl: () => buildUrl('/api/camera/snapshot', { access_token: getSession()?.accessToken, t: Date.now() }),
+  imageUrl: (id: number) => buildUrl(`/api/camera/snapshots/${id}/image`, { access_token: getSession()?.accessToken }),
+  /** Làm mới access token (khi ảnh / luồng bị 401). Trả false nếu phiên đã hết. */
+  refreshToken: () => refreshSession(),
 }
 
 // ------------------------------------------------------------------ chat & giọng nói

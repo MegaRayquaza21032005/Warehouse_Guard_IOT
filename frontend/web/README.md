@@ -33,8 +33,9 @@ npm run lint       # oxlint
 
 | Đường dẫn | Nội dung |
 |-----------|----------|
-| `/` | Trạng thái an toàn, 4 cảm biến, điều khiển 3 thiết bị (chờ ESP32 `ack`), **lệnh hẹn giờ** từ trợ lý AI (`/api/schedules`: đếm ngược, Hủy lịch), biểu đồ 30 phút, cảnh báo gần đây |
-| `/alerts` | Lọc theo mức / nguồn, "Đã xem", phản hồi đúng / báo giả (gửi tiếp sang memory của AI) |
+| `/` | Trạng thái an toàn, 4 cảm biến (thẻ chuyển động có thêm dòng "Camera: N người · THẤY LỬA / thấy khói"; quạt có ghi chú "không nên bật" khi camera thấy lửa), điều khiển 3 thiết bị (chờ ESP32 `ack`), **lệnh hẹn giờ** từ trợ lý AI (`/api/schedules`: đếm ngược, Hủy lịch), biểu đồ 30 phút, cảnh báo gần đây |
+| `/alerts` | Lọc theo mức / nguồn, "Đã xem", phản hồi đúng / báo giả (gửi tiếp sang memory của AI); cảnh báo đột nhập / cháy có người kèm **ảnh camera** (bấm để phóng to) |
+| `/camera` | **Camera trực tiếp**: MJPEG có khung YOLO qua `/api/camera/stream` (thẻ `<img>`, access token trong URL — chỉ backend `/api/camera/*` chấp nhận), tạm dừng / chụp / toàn màn hình; tự ngắt khi tab bị ẩn hoặc rời trang (đổi `src` sang ảnh trống — Chrome không tự ngắt MJPEG khi gỡ thẻ img); vision khởi động lại → tự kết nối lại (so `uptimeS` của `/api/camera/status`). Thẻ phát hiện người (số người, độ tin cậy, PIR, model, tốc độ, số người xem), thẻ phát hiện lửa / khói (độ tin cậy, MQ135, trạng thái an toàn — "theo camera" khi ESP32 chuyển `fire` nhờ camera; badge LỬA / Khói trên hình) và ảnh khi có sự cố (cập nhật qua WebSocket `camera.snapshot`) |
 | `/stats` | Biểu đồ theo danh mục CLAUDE.md mục 6, gọi thẳng `/api/stats` (không qua AI) |
 | `/device-logs` | Nhật ký lệnh thiết bị mọi nguồn trong 30 ngày, tự nạp lại khi có thay đổi |
 | `/chat` | Trợ lý AI: stream SSE, trạng thái worker, biểu đồ trong chat, [Đồng ý] / [Hủy] (kèm ghi chú lệnh nào chạy cùng lúc / hẹn giờ), lịch sử hội thoại, mic (Web Speech API, dự phòng ghi âm + STT server), đọc thành tiếng (giọng tiếng Việt của trình duyệt, dự phòng TTS server) |

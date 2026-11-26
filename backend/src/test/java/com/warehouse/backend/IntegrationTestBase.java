@@ -32,12 +32,15 @@ import tools.jackson.databind.ObjectMapper;
         "app.work-hours.start=08:00",
         "app.work-hours.end=17:30",
         "app.work-hours.days=1,2,3,4,5,6",
-        "app.agent.url=http://127.0.0.1:" + IntegrationTestBase.AGENT_PORT })
+        "app.agent.url=http://127.0.0.1:" + IntegrationTestBase.AGENT_PORT,
+        "app.vision.url=http://127.0.0.1:" + IntegrationTestBase.VISION_PORT })
 @Import(TestcontainersConfiguration.class)
 public abstract class IntegrationTestBase {
 
     /** Cổng của AI Agent giả (ChatIntegrationTest). */
     protected static final int AGENT_PORT = 18765;
+    /** Cổng của service vision giả (CameraIntegrationTest). */
+    protected static final int VISION_PORT = 18766;
 
     protected static final TypeReference<Map<String, Object>> MAP = new TypeReference<>() {
     };
@@ -62,7 +65,8 @@ public abstract class IntegrationTestBase {
         jdbc.sql("""
                 TRUNCATE app.users, app.refresh_tokens, app.mq135_readings, app.climate_readings, app.motion_events,
                          app.safety_events, app.device_states, app.device_health, app.device_config,
-                         app.device_command_logs, app.alerts, app.push_tokens RESTART IDENTITY CASCADE""").update();
+                         app.device_command_logs, app.alerts, app.push_tokens, app.camera_events,
+                         app.camera_snapshots RESTART IDENTITY CASCADE""").update();
     }
 
     protected String json(Object o) {

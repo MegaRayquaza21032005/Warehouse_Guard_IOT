@@ -12,7 +12,7 @@ cd backend
 mvn spring-boot:run                  # hoặc: mvn package -DskipTests && java -jar target/backend-0.0.1-SNAPSHOT.jar
 ```
 
-- Cấu hình đọc từ `../.env` (phải chạy trong thư mục `backend/`): `POSTGRES_*`, `MQTT_BACKEND_*`, `JWT_SECRET`, `JWT_ACCESS_TTL_MIN`, `JWT_REFRESH_TTL_DAYS`, `INTERNAL_API_KEY`, `WORK_HOURS_*`, `WORK_DAYS`, `CORS_ALLOWED_ORIGINS`, `BACKEND_PORT` (8080), `AGENT_PORT` / `AGENT_URL` (AI Agent, mặc định `http://localhost:8000`), `FCM_CREDENTIALS_FILE` (push, trống = tắt).
+- Cấu hình đọc từ `../.env` (phải chạy trong thư mục `backend/`): `POSTGRES_*`, `MQTT_BACKEND_*`, `JWT_SECRET`, `JWT_ACCESS_TTL_MIN`, `JWT_REFRESH_TTL_DAYS`, `INTERNAL_API_KEY`, `WORK_HOURS_*`, `WORK_DAYS`, `CORS_ALLOWED_ORIGINS`, `BACKEND_PORT` (8080), `AGENT_PORT` / `AGENT_URL` (AI Agent, mặc định `http://localhost:8000`), `VISION_PORT` / `VISION_URL` (service camera, mặc định `http://localhost:8100`), `CAMERA_SNAPSHOT_RETENTION_DAYS` (30), `FCM_CREDENTIALS_FILE` (push, trống = tắt).
 - Migration Flyway tự chạy khi khởi động (`src/main/resources/db/migration`).
 - Broker chưa chạy → app vẫn khởi động, tự kết nối lại mỗi 5 giây.
 
@@ -30,6 +30,7 @@ Test đầu cuối không cần ESP32: chạy backend rồi `conda run -n iot-ag
 |------|----------|--------|
 | JWT access token (60 phút) | Web / app | `Authorization: Bearer <accessToken>` |
 | Khóa nội bộ | AI Agent | `X-Internal-Key: <INTERNAL_API_KEY>` — đọc được mọi API, **không** gọi được API cần người dùng (điều khiển, ack...) |
+| Token trong URL | Chỉ `GET /api/camera/*` | `?access_token=<accessToken>` — vì `<img>` (MJPEG, ảnh) và `Image` của React Native không gửi được header. API khác **không** nhận token qua URL |
 
 Refresh token (30 ngày) xoay vòng: mỗi lần `/refresh` trả cặp token mới, token cũ hết hiệu lực.
 
@@ -53,8 +54,8 @@ Lỗi luôn có dạng `{"error": "<mã>", "message": "...", "details": {...}}`.
 
 | Method | Path | Ghi chú |
 |--------|------|---------|
-| GET | `/api/state` | Snapshot hiện tại: `online`, `device`, `safety`, `sensors{mq135,dht11,pir}`, `devices{fan,mist,light}`, `config`, `brokerConnected`, `workHours{start,end,days,timezone}`. Mỗi mục `{"data": <payload MQTT>, "updatedAt"}`, hoặc `null` nếu ESP32 chưa từng gửi |
-| GET | `/api/readings/{kind}?from&to&limit&device` | Dữ liệu thô, mới nhất trước. `kind`: `mq135`, `climate`, `motion`, `safety`, `health`, `device-states`. Mặc định 1 giờ gần nhất, tối đa 5000 dòng |
+| GET | `/api/state` | Snapshot hiện tại: `online`, `device`, `safety`, `sensors{mq135,dht11,pir,camera}`, `devices{fan,mist,light}`, `config`, `camera` (service vision online/offline), `brokerConnected`, `workHours{start,end,days,timezone}`. Mỗi mục `{"data": <payload MQTT>, "updatedAt"}`, hoặc `null` nếu ESP32 chưa từng gửi |
+| GET | `/api/readings/{kind}?from&to&limit&device` | Dữ liệu thô, mới nhất trước. `kind`: `mq135`, `climate`, `motion`, `camera` (có / hết người, số người, lửa, khói, lỗi — chỉ ghi khi đổi), `safety`, `health`, `device-states`. Mặc định 1 giờ gần nhất, tối đa 5000 dòng |
 
 ### Thiết bị
 
@@ -70,10 +71,22 @@ Lỗi luôn có dạng `{"error": "<mã>", "message": "...", "details": {...}}`.
 
 | Method | Path | Ghi chú |
 |--------|------|---------|
-| GET | `/api/alerts?level&unacked&page&size` | Mới nhất trước. Mỗi cảnh báo: `id, ts, type, level, message, source, incidentId, acknowledgedBy(Name), acknowledgedAt, feedback, feedbackNote, details` (`details` = `details` của bản tin `warehouse/alert`, vd. `push:false`) |
+| GET | `/api/alerts?level&unacked&page&size` | Mới nhất trước. Mỗi cảnh báo: `id, ts, type, level, message, source, incidentId, acknowledgedBy(Name), acknowledgedAt, feedback, feedbackNote, details, snapshotId` (`details` = `details` của bản tin `warehouse/alert`, vd. `push:false`; `snapshotId` = ảnh camera chụp lúc có cảnh báo, `null` nếu không có) |
 | GET | `/api/alerts/{id}` | |
 | POST | `/api/alerts/{id}/ack` | "Đã xem" (dừng leo thang) |
 | POST | `/api/alerts/{id}/feedback` | `{"feedback":"true_alarm\|false_alarm","note"?}` |
+
+### Camera — `/api/camera` (trung gian tới service vision)
+
+| Method | Path | Ghi chú |
+|--------|------|---------|
+| GET | `/api/camera/status` | `{"online": <status/camera>, "detection": <sensor/camera mới nhất>, "reachable", "service": <GET /status của vision> \| null, "error"?: "vision_unavailable"}` |
+| GET | `/api/camera/stream?fps=10` | MJPEG `multipart/x-mixed-replace` (ảnh có khung YOLO), fps 1–30. Ghi thẳng ra response (không qua async → không bị `spring.mvc.async.request-timeout` cắt). Client đóng → đóng luồng tới vision. 503 `vision_unavailable` nếu vision chưa chạy |
+| GET | `/api/camera/snapshot` | Ảnh hiện tại (JPEG, `no-store`) — app mobile lấy liên tục thay cho MJPEG. 503 `camera_no_frame` |
+| GET | `/api/camera/snapshots?alertId&incidentId&limit` | Ảnh chụp khi có sự cố (không kèm dữ liệu ảnh): `id, ts, alertId, alertType, incidentId, personCount, contentType, sizeBytes` |
+| GET | `/api/camera/snapshots/{id}/image` | JPEG (cache private 1 ngày). 404 `snapshot_not_found` |
+
+**Ảnh khi có sự cố:** cảnh báo `intrusion`, `intrusion_confirmed`, `fire_people`, `fire`, `camera_fire`, `camera_smoke` (cấu hình `app.vision.snapshot-alert-types`) được lưu → backend gọi `GET /snapshot.jpg` của vision (chạy nền, lỗi không ảnh hưởng việc lưu cảnh báo) → `app.camera_snapshots` (bytea) → WebSocket `camera.snapshot`. Ảnh cũ hơn `CAMERA_SNAPSHOT_RETENTION_DAYS` bị xóa lúc 03:17 hằng ngày.
 
 ### Thống kê — `/api/stats`
 
@@ -151,10 +164,10 @@ Mỗi cảnh báo lưu vào `app.alerts` sẽ được **push cho mọi máy đ�
 `ws://<host>:8080/ws/live?token=<accessToken>` (sai / thiếu token → 401).
 
 1. Ngay khi kết nối: `{"type":"snapshot","data":<giống GET /api/state>,"ts"}`.
-2. Mỗi bản tin MQTT: `{"type":"sensor.mq135","topic":"warehouse/sensor/mq135","data":{...},"ts"}`. `type` = topic bỏ `warehouse/`, `/` → `.`: `sensor.mq135|dht11|pir`, `status.safety|online|device|config|fan|mist|light`, `alert` (data là cảnh báo đã lưu, có `id`).
+2. Mỗi bản tin MQTT: `{"type":"sensor.mq135","topic":"warehouse/sensor/mq135","data":{...},"ts"}`. `type` = topic bỏ `warehouse/`, `/` → `.`: `sensor.mq135|dht11|pir|camera`, `status.safety|online|device|config|fan|mist|light|camera`, `alert` (data là cảnh báo đã lưu, có `id`), `camera.snapshot` (`{id, alertId, alertType, incidentId}` — ảnh vừa chụp cho cảnh báo).
 
 Token hết hạn không tự ngắt WebSocket đang mở; client nên kết nối lại với token mới sau khi refresh.
 
 ## Database (schema `app`)
 
-`users`, `refresh_tokens` (SHA-256), `push_tokens` (FCM), `mq135_readings`, `climate_readings`, `motion_events`, `safety_events` (chỉ ghi khi đổi), `device_states` (chỉ ghi khi đổi), `device_health`, `device_config` (1 dòng), `device_command_logs`, `alerts`. Bản tin retained gửi lại khi kết nối lại broker không tạo dòng trùng.
+`users`, `refresh_tokens` (SHA-256), `push_tokens` (FCM), `mq135_readings`, `climate_readings`, `motion_events`, `safety_events` (chỉ ghi khi đổi), `device_states` (chỉ ghi khi đổi), `device_health`, `device_config` (1 dòng), `device_command_logs`, `alerts`, `camera_events` (chỉ ghi khi đổi người / số người / lửa / khói / lỗi; cột `fire`, `smoke` NULL = vision chưa có model lửa — Flyway V5), `camera_snapshots` (ảnh JPEG khi có sự cố). Bản tin retained gửi lại khi kết nối lại broker không tạo dòng trùng.

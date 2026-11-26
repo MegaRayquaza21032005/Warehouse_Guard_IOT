@@ -17,7 +17,8 @@ public record AppProperties(
         WorkHours workHours,
         Mqtt mqtt,
         Agent agent,
-        Push push) {
+        Push push,
+        Vision vision) {
 
     public ZoneId zone() {
         return ZoneId.of(timezone);
@@ -39,6 +40,13 @@ public record AppProperties(
 
     /** AI Agent nội bộ (FastAPI, không public). url vd. http://localhost:8000. */
     public record Agent(String url, Duration timeout) {
+    }
+
+    /**
+     * Service vision nội bộ (camera + YOLO, chỉ nghe 127.0.0.1). url vd. http://localhost:8100.
+     * snapshotAlertTypes: loại cảnh báo được chụp ảnh làm bằng chứng; snapshotRetentionDays: giữ ảnh bao lâu.
+     */
+    public record Vision(String url, Duration timeout, List<String> snapshotAlertTypes, int snapshotRetentionDays) {
     }
 
     /**

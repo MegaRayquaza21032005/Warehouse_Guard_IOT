@@ -49,6 +49,7 @@ class GuardContext:
     climate_age_s: float | None = None
     hum_high: float = 80.0
     online: bool | None = None              # None = chưa biết (mới khởi động)
+    camera_fire: bool = False               # camera (YOLO lửa / khói) đang thấy lửa
 
     @property
     def hum_known(self) -> float | None:
@@ -95,6 +96,8 @@ def check_device(device: str, ctx: GuardContext, *, state: str | None = None, mo
     if device == "fan":
         if state == "on" and s == "fire":
             return Verdict.block("Đang NGHI CHÁY: không bật quạt (thổi thêm oxy, thổi bay hơi sương)")
+        if state == "on" and ctx.camera_fire:
+            return Verdict.block("Camera đang thấy LỬA: không bật quạt (thổi thêm oxy vào đám cháy)")
         if state == "off" and s == "gas_danger":
             return Verdict.block("Khí nồng độ cao: quạt phải chạy để thông gió (ESP32 cũng sẽ giữ quạt bật)")
         if state == "off" and s == "gas":
@@ -109,6 +112,8 @@ def check_device(device: str, ctx: GuardContext, *, state: str | None = None, mo
             return Verdict.block(f"Độ ẩm {hum:.0f}% ≥ ngưỡng {ctx.hum_high:.0f}%: cấm bật phun sương")
     elif device == "light" and state == "off" and s in ("fire", "gas_danger"):
         return Verdict.block("Đang có nguy hiểm: đèn thoát hiểm phải sáng (ESP32 cũng sẽ giữ đèn bật)")
+    elif device == "light" and state == "off" and ctx.camera_fire:
+        return Verdict.block("Camera đang thấy lửa: đèn thoát hiểm phải sáng")
     return Verdict.ok()
 
 

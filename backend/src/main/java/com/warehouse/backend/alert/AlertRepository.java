@@ -21,7 +21,8 @@ public class AlertRepository {
     private static final String COLUMNS = """
             a.id, a.ts, a.type, a.level, a.message, a.source, a.incident_id,
             a.acknowledged_by, ua.username AS acknowledged_by_name, a.acknowledged_at,
-            a.feedback, a.feedback_note, a.feedback_by, (a.payload->'details')::text AS details_json""";
+            a.feedback, a.feedback_note, a.feedback_by, (a.payload->'details')::text AS details_json,
+            (SELECT max(s.id) FROM app.camera_snapshots s WHERE s.alert_id = a.id) AS snapshot_id""";
     private static final String FROM = " FROM app.alerts a LEFT JOIN app.users ua ON ua.id = a.acknowledged_by";
 
     private final JdbcClient jdbc;
@@ -89,6 +90,7 @@ public class AlertRepository {
         m.put("feedbackNote", rs.getString("feedback_note"));
         m.put("feedbackBy", rs.getObject("feedback_by"));
         m.put("details", details(rs.getString("details_json")));
+        m.put("snapshotId", rs.getObject("snapshot_id"));     // ảnh camera chụp lúc có cảnh báo (nếu có)
         return m;
     }
 

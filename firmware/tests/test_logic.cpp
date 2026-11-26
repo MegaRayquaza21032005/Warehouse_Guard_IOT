@@ -76,6 +76,32 @@ static void test_safety_target() {
   // DHT hỏng: đang cháy thì giữ cháy, chưa cháy thì không tự suy ra cháy
   CHECK(computeTarget(MQ_DANGER, false, false, false, SAFE_FIRE) == SAFE_FIRE);
   CHECK(computeTarget(MQ_DANGER, false, false, false, SAFE_GAS) == SAFE_GAS_DANGER);
+  // Camera thấy lửa = bằng chứng "nóng"
+  CHECK(computeTarget(MQ_WARNING, true, false, false, SAFE_GAS, true) == SAFE_FIRE);       // khói + lửa camera
+  CHECK(computeTarget(MQ_DANGER, true, false, false, SAFE_GAS_DANGER, true) == SAFE_FIRE); // ghi đè gas_danger
+  CHECK(computeTarget(MQ_WARNING, false, false, false, SAFE_GAS, true) == SAFE_FIRE);      // DHT hỏng + lửa camera
+  CHECK(computeTarget(MQ_NORMAL, true, false, false, SAFE_NORMAL, true) == SAFE_NORMAL);   // chỉ camera: không đổi
+}
+
+static void test_camera_fire_tracker() {
+  std::printf("camera fire tracker (hết hạn khi vision im lặng)\n");
+  CameraFireTracker c;
+  const uint32_t TTL = 15000;
+  CHECK(!c.active(0, TTL));                     // chưa có bản tin
+  c.onMessage(1, 1000);
+  CHECK(c.active(1000, TTL));
+  CHECK(c.active(15999, TTL));
+  CHECK(!c.active(16000, TTL));                 // 15s không có bản tin -> hết hạn
+  c.onMessage(1, 20000);
+  CHECK(c.active(21000, TTL));
+  c.onMessage(0, 22000);                        // vision báo hết lửa
+  CHECK(!c.active(22000, TTL));
+  c.onMessage(1, 23000);
+  c.onMessage(-1, 24000);                       // camera lỗi -> không biết -> không tính
+  CHECK(!c.active(24000, TTL));
+  // millis() tràn số (~49 ngày)
+  c.onMessage(1, 0xFFFFF000u);
+  CHECK(c.active(0x00000100u, TTL));
 }
 
 static void test_safety_tracker() {
@@ -198,6 +224,7 @@ int main() {
   test_mq_level();
   test_temp_history();
   test_safety_target();
+  test_camera_fire_tracker();
   test_safety_tracker();
   test_fan();
   test_fan_hum_ineffective();

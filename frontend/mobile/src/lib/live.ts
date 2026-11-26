@@ -109,6 +109,10 @@ function mergeLive(type: string, data: unknown, ts: string): LiveState {
       return { ...l, sensors: { ...l.sensors, dht11: st(data) } }
     case 'sensor.pir':
       return { ...l, sensors: { ...l.sensors, pir: st(data) } }
+    case 'sensor.camera':
+      return { ...l, sensors: { ...l.sensors, camera: st(data) } }
+    case 'status.camera':
+      return { ...l, camera: st(data) }
     case 'status.safety':
       return { ...l, safety: st(data) }
     case 'status.online':
@@ -153,6 +157,10 @@ function onMessage(msg: { type: string; data: unknown; ts?: string }) {
       set({ alerts: [a, ...snap.alerts] })
       alertListeners.forEach((l) => l(a))
     }
+  } else if (msg.type === 'camera.snapshot') {
+    // ảnh camera vừa chụp cho một cảnh báo (đột nhập / cháy / camera thấy lửa, khói) — chụp sau khi cảnh báo đã tới
+    const d = msg.data as { id: number; alertId: number | null }
+    set({ alerts: snap.alerts.map((a) => (a.id === d.alertId ? { ...a, snapshotId: d.id } : a)) })
   } else {
     const live = mergeLive(msg.type, msg.data, ts)
     const patch: Partial<LiveSnapshot> = withLive(live)

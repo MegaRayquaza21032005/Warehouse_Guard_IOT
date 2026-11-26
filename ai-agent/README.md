@@ -66,10 +66,15 @@ Test **không gọi OpenAI**: đồ thị multi-agent chạy với LLM giả có
 
 | Cảnh báo `type` | Mức | Khi nào |
 |-----------------|-----|---------|
-| `fire` / `fire_people` | critical | `status/safety` → `fire`; `fire_people` nếu có chuyển động trong 2 phút (hoặc chuyển động xuất hiện trong lúc cháy) |
+| `fire` / `fire_people` | critical | `status/safety` → `fire`; `fire_people` nếu có người trong 2 phút — PIR có chuyển động **hoặc** camera thấy người (hoặc xuất hiện trong lúc cháy). Có camera: "có N người". `status/safety.cameraFire=true` (ESP32 chuyển `fire` vì camera thấy lửa + MQ135 có khói) → nội dung "camera thấy LỬA", `details.evidence = ["mq135","camera"]` |
+| `camera_fire` | critical | Camera thấy lửa khi MQ135 bình thường (hoặc ESP32 offline, hoặc MQ135 có khói mà ESP32 **không** chuyển `fire` sau `CAMERA_FIRE_ESP_GRACE_S` = 5s — firmware cũ). Bật đèn (`reason=camera_fire`, làm mới mỗi phút); **không** đổi quạt / phun sương. Sự cố `vision`, đóng sau `CAMERA_CLEAR_S` = 2 phút không thấy lửa / khói. Đang `fire` sẵn → chỉ ghi diễn biến sự cố, không báo trùng |
+| `camera_smoke` | warning | Camera thấy khói ≥ `GAS_CONFIRM_S` khi MQ135 bình thường và không thấy lửa (MQ135 đã báo khí → bỏ qua). Không đổi thiết bị; có cooldown |
 | `gas_danger` | critical | → `gas_danger` |
 | `gas` | warning | → `gas` và giữ ≥ `GAS_CONFIRM_S` (chống báo giả) |
-| `intrusion` | critical | Chuyển động ngoài giờ làm việc → bật đèn `LIGHT_ON_AFTER_HOURS_S` giây (lệnh `source=rule`); hết chuyển động `INTRUSION_CLEAR_MIN` phút → đóng sự cố |
+| `intrusion` | critical | Ngoài giờ làm việc: PIR có chuyển động **hoặc** camera thấy người → bật đèn `LIGHT_ON_AFTER_HOURS_S` giây (lệnh `source=rule`, làm mới tối đa 1 lần/phút); hết chuyển động **và** camera không thấy người `INTRUSION_CLEAR_MIN` phút → đóng sự cố. `details.evidence` = `["pir"]` / `["camera"]` / cả hai, `details.person_count` |
+| `intrusion_confirmed` | critical | Sự cố đột nhập mở do PIR, sau đó camera thấy người → "Camera XÁC NHẬN có N người" (1 lần / sự cố) |
+| `camera_offline` | warning | `status/camera` từ online → offline (không báo lúc ai-agent khởi động thấy offline retained) |
+| `camera_fault` | warning | `sensor/camera` có `error` (vd. `camera_unavailable` — bị che / rút cáp / app khác chiếm) |
 | `mist_fire_max_time` | critical | Phun sương báo `reason=fire_max_time` |
 | `device_offline` / `no_data` | warning | LWT offline / không có dữ liệu > `OFFLINE_TIMEOUT_S` |
 | `device_no_response` | warning | Lệnh `cmd/*` không có `ack` sau `CMD_ACK_TIMEOUT_S` |
@@ -81,6 +86,8 @@ Test **không gọi OpenAI**: đồ thị multi-agent chạy với LLM giả có
 | `escalation` | critical | Cảnh báo critical chưa ai bấm "Đã xem" quá `ESCALATION_MIN` phút (hỏi Java BE 30s/lần) |
 
 - `info` / `warning` cùng loại: cooldown `ALERT_COOLDOWN_MIN`. `critical` **không bao giờ** bị chặn.
+- **Camera (service `vision/`) BỔ SUNG PIR, không hạ mức:** camera không thấy người không làm giảm / chặn cảnh báo của PIR (camera có thể bị tối, bị che, không nhìn tới). Bản tin camera không tính là dữ liệu ESP32 (không che `no_data`). Java BE tự chụp ảnh cho `intrusion`, `intrusion_confirmed`, `fire_people`, `fire`, `camera_fire`, `camera_smoke`.
+- **Camera lửa / khói BỔ SUNG MQ135** ("MQ135 hoặc camera", chốt 2026-11-26): lửa + khói MQ135 → ESP32 tự chuyển `fire` (subscribe `sensor/camera`); chỉ lửa → `camera_fire` + đèn; khói → `camera_smoke`. Camera lỗi / offline → bỏ trạng thái lửa / khói của camera (không báo hết cháy). Test: `tests/test_rules_camera_fire.py`.
 - Gửi theo mức: `critical` gửi ngay (rồi LLM gửi thêm `<type>_analysis`); `warning` / `info` qua LLM trước (tối đa `LLM_ALERT_TIMEOUT_S`), quá hạn / lỗi → bản của tầng luật. `escalation` không qua LLM.
 
 ## Multi-agent (CLAUDE.md mục 8)
@@ -101,7 +108,7 @@ START ─► supervisor ──(ask_*)──► dispatch ──(có đề xuất)
 
 - **Quyền tối thiểu:** mỗi worker chỉ được bind đúng bộ tool của mình; gọi tool ngoài quyền → ghi log `error`, không chạy.
 - **Mọi tool call đều được ghi** (`app/agents/tools.py`: tool chỉ tạo được qua `make_read_tool` / `make_write_tool`), kể cả lệnh giao việc của Supervisor.
-- **Safety Guard** (`app/agents/safety_guard.py`, code thuần): không bật quạt khi `fire`; không tắt quạt / đèn khi `gas_danger` (đèn: cả `fire`); không bật phun sương khi có khí/khói, độ ẩm ≥ `humHigh` hoặc không có số liệu ẩm gần đây (> 120s); ESP32 offline → chặn; ngưỡng kiểm tra giống firmware. Kiểm tra **2 lần**: khi tạo đề xuất và ngay trước khi gửi MQTT.
+- **Safety Guard** (`app/agents/safety_guard.py`, code thuần): không bật quạt khi `fire` **hoặc camera đang thấy lửa** (không tắt đèn khi camera thấy lửa); không tắt quạt / đèn khi `gas_danger` (đèn: cả `fire`); không bật phun sương khi có khí/khói, độ ẩm ≥ `humHigh` hoặc không có số liệu ẩm gần đây (> 120s); ESP32 offline → chặn; ngưỡng kiểm tra giống firmware. Kiểm tra **2 lần**: khi tạo đề xuất và ngay trước khi gửi MQTT.
 - **Luồng chat:** tool ghi chỉ tạo **đề xuất** (log `pending_confirmation`) → `interrupt` → người dùng bấm → `approved` → gửi lệnh (`source=user`, `user_id`) → chờ ESP32 `ack` tối đa 8s → `success`; Hủy → `rejected`; quá `CONFIRM_TTL_S` → hết hạn. Đang chờ xác nhận thì không nhận tin nhắn mới (409).
 - **Lệnh nối chuỗi / hẹn giờ** ("bật phun sương 30s rồi bật quạt 30s", "10 phút nữa bật quạt", "tắt quạt rồi bật lại"): Control dùng `delay_s` (bắt đầu sau N giây **kể từ lúc bấm Đồng ý**, ≤ 24h); người dùng bấm [Đồng ý] **một lần** cho cả chuỗi. Lệnh không có `delay_s` chạy ngay **cùng lúc**; khung xác nhận luôn có `schedule_note` (code sinh) nói rõ lệnh nào chạy cùng lúc / hẹn giờ. Lệnh hẹn giờ nằm trong RAM (`app/agents/scheduler.py`): đến giờ Safety Guard **kiểm tra lại** rồi mới gửi MQTT (`source=user`, `user_id` người đồng ý); lệnh thủ công mới của người dùng cho cùng thiết bị → **hủy lịch** của thiết bị đó; ai-agent dừng / khởi động lại → lịch bị hủy (nhật ký `cancelled`). Safety Guard `check_schedule`: tối đa 2 lệnh / thiết bị / yêu cầu, cách nhau ≥ 10s (chống nháy relay), luồng sự cố không hẹn giờ, tối đa 20 lịch đang chờ. Log `[SCHEDULE]` (HẸN / CHẠY / HỦY).
 - **Control trả lời mà không gọi tool** (LLM viết "đã tạo đề xuất" nhưng không có đề xuất nào, nên không có nút): `dispatch` phát hiện (`RunContext.tool_calls == 0`, 0 đề xuất) → gọi lại Control **1 lần** kèm `CONTROL_RETRY`; vẫn không gọi tool → Supervisor nhận câu cố định `CONTROL_NO_PROPOSAL` nên không thể nói "đang chờ [Đồng ý]". Trả lời bắt đầu bằng `THIẾU THÔNG TIN:` (cần hỏi lại người dùng) không bị gọi lại. Log `[AGENT]` mức WARNING; `ask_control` trong `tool_call_logs` có `result.retried = true`.

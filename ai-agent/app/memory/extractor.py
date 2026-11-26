@@ -30,7 +30,7 @@ AGENT = "memory_extractor"
 MIN_MESSAGE_CHARS = 8
 FEEDBACK_VI = {"false_alarm": "BÁO GIẢ", "true_alarm": "ĐÚNG (sự cố thật)"}
 KIND_VI = {"safety": "Sự cố an toàn (khí / khói / cháy)", "intrusion": "Đột nhập ngoài giờ",
-           "offline": "ESP32 mất kết nối"}
+           "offline": "ESP32 mất kết nối", "vision": "Camera thấy lửa / khói"}
 
 
 def vn_time(v: Any) -> str:

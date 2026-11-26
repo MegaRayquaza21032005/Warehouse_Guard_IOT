@@ -9,6 +9,7 @@ import { live } from '../../lib/live'
 import { useColors } from '../../lib/theme'
 import { LevelIcon, levelTone } from '../../components/AlertItem'
 import { Badge, Button, Card, ErrorText, Muted } from '../../components/ui'
+import { SnapshotImage } from '../../components/SnapshotImage'
 
 const DETAIL_LABEL: Record<string, string> = {
   temp: 'Nhiệt độ (°C)',
@@ -18,6 +19,11 @@ const DETAIL_LABEL: Record<string, string> = {
   duration_min: 'Thời gian (phút)',
   motion: 'Chuyển động',
   device: 'Thiết bị',
+  person_count: 'Số người (camera)',
+  camera_fire: 'Camera thấy lửa',
+  camera_smoke: 'Camera thấy khói',
+  fire_conf: 'Lửa — độ tin cậy',
+  smoke_conf: 'Khói — độ tin cậy',
 }
 
 /** Chi tiết một cảnh báo — màn hình mở ra khi bấm push notification. */
@@ -77,6 +83,12 @@ export default function AlertDetail() {
           )}
         </View>
         <Text style={{ color: c.text, fontSize: 15.5, lineHeight: 22 }}>{a.message}</Text>
+        {a.snapshotId ? (
+          <View style={{ gap: 4 }}>
+            <SnapshotImage key={a.snapshotId} id={a.snapshotId} style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: 10 }} />
+            <Muted style={{ fontSize: 12 }}>Ảnh camera chụp lúc có cảnh báo (khung xanh = người do YOLO phát hiện)</Muted>
+          </View>
+        ) : null}
         {details.length > 0 && (
           <View style={{ gap: 4, backgroundColor: c.surface2, borderRadius: 10, padding: 10 }}>
             {details.map(([k, v]) => (

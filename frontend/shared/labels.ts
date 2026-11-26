@@ -49,6 +49,7 @@ const REASON: Record<string, string> = {
   manual: 'Thủ công',
   idle: 'Không có yêu cầu',
   motion_after_hours: 'Chuyển động ngoài giờ',
+  camera_fire: 'Camera thấy lửa',
 }
 
 export const reasonLabel = (r: string) => REASON[r] ?? r
@@ -59,6 +60,11 @@ const ALERT_TYPE: Record<string, string> = {
   gas_danger: 'Rò rỉ khí nhiều',
   gas: 'Có khí / khói',
   intrusion: 'Đột nhập',
+  intrusion_confirmed: 'Camera xác nhận có người',
+  camera_offline: 'Camera mất kết nối',
+  camera_fault: 'Camera không có hình',
+  camera_fire: 'Camera thấy lửa',
+  camera_smoke: 'Camera thấy khói',
   mist_fire_max_time: 'Phun sương hết giờ',
   device_offline: 'Thiết bị mất kết nối',
   no_data: 'Không có dữ liệu',
@@ -75,6 +81,15 @@ export const alertTypeLabel = (t: string) => {
   if (t.endsWith('_analysis')) return `Phân tích: ${ALERT_TYPE[t.replace(/_analysis$/, '')] ?? t}`
   return ALERT_TYPE[t] ?? t
 }
+
+const CAMERA_ERROR: Record<string, string> = {
+  camera_unavailable: 'Camera không có hình (bị che, rút cáp hoặc ứng dụng khác đang dùng)',
+  detector_failed: 'Lỗi nhận dạng (YOLO)',
+  vision_unavailable: 'Service camera chưa chạy',
+  camera_no_frame: 'Camera chưa có hình',
+}
+
+export const cameraErrorLabel = (e: string) => CAMERA_ERROR[e] ?? e
 
 export const FAULT_LABEL: Record<string, string> = {
   mq135_disconnected: 'MQ135 mất kết nối (đọc ≈ 0)',

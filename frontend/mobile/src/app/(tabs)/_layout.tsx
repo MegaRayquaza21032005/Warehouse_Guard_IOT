@@ -31,6 +31,7 @@ export default function TabsLayout() {
         name="alerts"
         options={{ title: 'Cảnh báo', tabBarIcon: icon('notifications-outline'), tabBarBadge: unacked ? (unacked > 99 ? '99+' : unacked) : undefined }}
       />
+      <Tabs.Screen name="camera" options={{ title: 'Camera', tabBarIcon: icon('videocam-outline') }} />
       <Tabs.Screen name="chat" options={{ title: 'Trợ lý AI', tabBarIcon: icon('chatbubble-ellipses-outline') }} />
       <Tabs.Screen name="stats" options={{ title: 'Thống kê', tabBarIcon: icon('bar-chart-outline') }} />
       <Tabs.Screen name="more" options={{ title: 'Thêm', tabBarIcon: icon('menu-outline') }} />

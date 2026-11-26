@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Activity,
+  Cctv,
   CheckCircle2,
   Clock,
   Droplets,
@@ -276,9 +277,30 @@ function PirCard({ live, afterHours, workHours }: { live: LiveState; afterHours:
       <div className="foot">
         <span>{live.sensors.pir ? `Thay đổi ${fmtAgo(live.sensors.pir.updatedAt)}` : 'Chưa có dữ liệu'}</span>
       </div>
+      <CameraLine live={live} afterHours={afterHours} />
       <div className="foot">
-        <span>{afterHours ? 'Chuyển động lúc này sẽ báo đột nhập + bật đèn' : `Giờ làm việc: ${fmtWorkHours(workHours)}`}</span>
+        <span>{afterHours ? 'Chuyển động / người lúc này sẽ báo đột nhập + bật đèn' : `Giờ làm việc: ${fmtWorkHours(workHours)}`}</span>
       </div>
+    </div>
+  )
+}
+
+/** Camera (YOLO) bổ sung PIR: số người đang thấy (+ lửa / khói). Chưa từng chạy service vision -> không hiện. */
+function CameraLine({ live, afterHours }: { live: LiveState; afterHours: boolean }) {
+  const online = live.camera?.data.status === 'online'
+  const d = live.sensors.camera?.data
+  if (!live.camera) return null
+  const present = online && !!d?.person && !d.error
+  const text = !online ? 'mất kết nối' : d?.error ? 'không có hình' : present ? `${d.personCount ?? 1} người` : 'không có người'
+  const fire = online && !d?.error && d?.fire === true
+  const smoke = online && !d?.error && d?.smoke === true
+  const hazard = fire ? ' · THẤY LỬA' : smoke ? ' · thấy khói' : ''
+  const color = fire ? 'var(--crit)' : present ? (afterHours ? 'var(--crit)' : 'var(--accent)') : smoke ? 'var(--warn)' : 'inherit'
+  return (
+    <div className="foot">
+      <Link to="/camera" style={{ display: 'inline-flex', gap: 5, alignItems: 'center', color, fontWeight: present || fire || smoke ? 600 : 400 }}>
+        <Cctv size={13} /> Camera: {text}{hazard}
+      </Link>
     </div>
   )
 }
@@ -292,6 +314,8 @@ function lockNote(device: DeviceName, live: LiveState, cfg: DeviceConfig): strin
   const hum = live.sensors.dht11?.data.hum ?? 0
   if (device === 'fan' && s === 'fire') return 'Nghi cháy: quạt luôn TẮT (không thổi thêm oxy).'
   if (device === 'fan' && s === 'gas_danger') return 'Rò rỉ khí nhiều: quạt luôn BẬT.'
+  const camFire = live.camera?.data.status === 'online' && !live.sensors.camera?.data.error && live.sensors.camera?.data.fire === true
+  if (device === 'fan' && camFire) return 'Camera đang thấy lửa: KHÔNG nên bật quạt (thổi thêm oxy). Kiểm tra camera trước.'
   if (device === 'light' && (s === 'fire' || s === 'gas_danger')) return 'Đèn luôn BẬT để chiếu sáng thoát hiểm.'
   if (device === 'mist' && s === 'fire') return 'Nghi cháy: phun sương BẬT tối đa ' + cfg.mistFireMaxMin + ' phút. Vẫn có thể TẮT thủ công.'
   if (device === 'mist' && (s === 'gas' || s === 'gas_danger')) return 'Có khói nhưng không nóng: cấm phun sương.'

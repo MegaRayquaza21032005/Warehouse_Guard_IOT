@@ -1,0 +1,26 @@
+# Conda env riêng cho service vision (camera + YOLO) — KHÔNG dùng chung env khác.
+# Tạo:      conda env create -f vision/environment.yml
+# Cập nhật: conda env update -f vision/environment.yml --prune
+# Kích hoạt: conda activate iot-vision
+# Phiên bản đã cài thực tế được ghi lại trong vision/requirements.lock.txt
+# PyTorch từ PyPI (Linux x86_64) đã kèm CUDA 12.x -> chạy được trên GPU NVIDIA (driver >= 525).
+name: iot-vision
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+      # Phát hiện đối tượng
+      - ultralytics          # YOLO (AGPL-3.0) — kéo theo torch, torchvision, opencv-python
+      # Web API (MJPEG stream, ảnh chụp, trạng thái)
+      - fastapi
+      - uvicorn[standard]
+      # Cấu hình
+      - pydantic-settings
+      - python-dotenv
+      # Kết nối
+      - paho-mqtt>=2.0
+      # Kiểm thử
+      - pytest
+      - httpx

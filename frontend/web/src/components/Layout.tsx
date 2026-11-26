@@ -4,6 +4,7 @@ import {
   AlertOctagon,
   Bell,
   BotMessageSquare,
+  Cctv,
   ChartColumn,
   LayoutDashboard,
   ListChecks,
@@ -27,6 +28,7 @@ import type { Alert } from '../types'
 const NAV = [
   { to: '/', label: 'Tổng quan', icon: LayoutDashboard, end: true },
   { to: '/alerts', label: 'Cảnh báo', icon: Bell },
+  { to: '/camera', label: 'Camera', icon: Cctv },
   { to: '/stats', label: 'Thống kê', icon: ChartColumn },
   { to: '/device-logs', label: 'Nhật ký thiết bị', icon: ListChecks },
   { to: '/chat', label: 'Trợ lý AI', icon: BotMessageSquare },
@@ -36,6 +38,7 @@ const NAV = [
 const TITLES: Record<string, string> = {
   '/': 'Tổng quan',
   '/alerts': 'Cảnh báo',
+  '/camera': 'Camera',
   '/stats': 'Thống kê',
   '/device-logs': 'Nhật ký thiết bị',
   '/chat': 'Trợ lý AI',

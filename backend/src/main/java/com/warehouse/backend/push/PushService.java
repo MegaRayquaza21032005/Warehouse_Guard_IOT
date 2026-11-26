@@ -31,7 +31,10 @@ public class PushService {
             Map.entry("device_no_response", "Thiết bị không phản hồi"), Map.entry("sensor_fault", "Lỗi cảm biến"),
             Map.entry("temp_high_prolonged", "Nóng kéo dài"), Map.entry("hum_high_prolonged", "Ẩm kéo dài"),
             Map.entry("ventilation_ineffective", "Thông gió không hiệu quả"), Map.entry("recovered", "Đã bình thường"),
-            Map.entry("escalation", "Chưa ai xem cảnh báo nguy hiểm"), Map.entry("manual_notice", "Thông báo"));
+            Map.entry("escalation", "Chưa ai xem cảnh báo nguy hiểm"), Map.entry("manual_notice", "Thông báo"),
+            Map.entry("intrusion_confirmed", "Camera xác nhận đột nhập"), Map.entry("camera_fire", "Camera thấy lửa"),
+            Map.entry("camera_smoke", "Camera thấy khói"), Map.entry("camera_offline", "Camera mất kết nối"),
+            Map.entry("camera_fault", "Camera không có hình"));
 
     private final PushTokenRepository tokens;
     private final FcmClient fcm;

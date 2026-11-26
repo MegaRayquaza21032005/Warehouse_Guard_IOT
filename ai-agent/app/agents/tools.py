@@ -73,7 +73,8 @@ class Services:
         c = e.latest_climate()
         return guard.GuardContext(safety=e.safety, temp=c[1] if c else None, hum=c[2] if c else None,
                                   climate_age_s=(time.time() - c[0]) if c else None,
-                                  hum_high=float(e.thresholds.get("humHigh", 80)), online=e.online)
+                                  hum_high=float(e.thresholds.get("humHigh", 80)), online=e.online,
+                                  camera_fire=e.camera_fire)
 
     def current_config(self) -> dict[str, Any]:
         return {**guard.CONFIG_DEFAULTS, **{k: v for k, v in self.engine.device_config.items()

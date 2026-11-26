@@ -52,7 +52,8 @@ iOS: `getDevicePushTokenAsync` trả token APNs, còn backend hiện chỉ gửi
 |-------|----------|
 | `(tabs)/index` | Tổng quan: dải cảnh báo nguy hiểm chưa xem, trạng thái an toàn, 4 cảm biến, điều khiển 3 thiết bị (chờ ESP32 `ack`), **lệnh hẹn giờ** từ trợ lý AI (đếm ngược, Hủy lịch), biểu đồ 30 phút |
 | `(tabs)/alerts` | Cảnh báo: lọc theo mức / chưa xem, đánh dấu đã xem hết, kéo để nạp lại |
-| `alert/[id]` | Chi tiết cảnh báo (màn hình mở từ push): đã xem, phản hồi đúng / báo giả |
+| `alert/[id]` | Chi tiết cảnh báo (màn hình mở từ push): ảnh camera (nếu có), đã xem, phản hồi đúng / báo giả |
+| `(tabs)/camera` | Camera trực tiếp: `Image` của React Native không hiển thị được MJPEG → lấy `/api/camera/snapshot` liên tục (~4–5 khung/giây), 2 lớp ảnh chồng nhau (lớp sau tải xong mới đưa lên — không nháy). Chỉ tải khi màn hình đang mở và app ở foreground. Thẻ phát hiện người, thẻ phát hiện lửa / khói (kèm MQ135, trạng thái an toàn, "theo camera"), badge LỬA / Khói trên hình, ảnh khi có sự cố (chạm để phóng to) |
 | `(tabs)/chat` | Trợ lý AI: SSE (`expo/fetch` đọc stream), biểu đồ trong chat, [Đồng ý] / [Hủy], lịch sử hội thoại, mic, đọc thành tiếng |
 | `(tabs)/stats` | Thống kê theo danh mục CLAUDE.md mục 6 |
 | `(tabs)/more` | Tài khoản, trạng thái push, tự đọc câu trả lời, memory cá nhân, đăng xuất |
