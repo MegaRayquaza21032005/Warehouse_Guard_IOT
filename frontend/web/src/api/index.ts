@@ -11,6 +11,7 @@ import type {
   CommandSource,
   LiveState,
   MemoryItem,
+  ScheduledCommand,
   StatsQuery,
   StatsResponse,
   TimelineSegment,
@@ -119,6 +120,13 @@ export const memoriesApi = {
   deleteMine: (key: string) => request<void>(`/api/memories/${encodeURIComponent(key)}`, { method: 'DELETE' }),
   warehouse: (kind: 'facts' | 'incidents' | 'feedback' = 'facts') => request<MemoryItem[]>('/api/memories/warehouse', { query: { kind } }),
   deleteFact: (key: string) => request<void>(`/api/memories/warehouse/${encodeURIComponent(key)}`, { method: 'DELETE' }),
+}
+
+// ------------------------------------------------------------------ lệnh hẹn giờ (tạo từ chatbot)
+
+export const schedulesApi = {
+  list: () => request<ScheduledCommand[]>('/api/schedules'),
+  cancel: (id: string) => request<void>(`/api/schedules/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 }
 
 // ------------------------------------------------------------------ chat & giọng nói

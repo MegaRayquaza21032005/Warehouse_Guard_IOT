@@ -1,6 +1,7 @@
 """Safety Guard — chính sách bằng code cho tool ghi (CLAUDE.md mục 5, 8)."""
 
-from app.agents.safety_guard import GuardContext, check_config, check_device, check_incident_action
+from app.agents.safety_guard import (GuardContext, check_config, check_device, check_incident_action,
+                                     check_schedule)
 
 
 def ctx(**kw) -> GuardContext:
@@ -78,3 +79,16 @@ def test_memory_cannot_relax_safety_or_store_secrets():
     assert not check_memory("mật khẩu wifi: sk-proj-ABCDEFGHIJKLMNOPQRSTUV").allowed
     assert not check_memory("").allowed
     assert not check_memory("x" * 501).allowed
+
+
+def test_schedule_rules():
+    assert check_schedule("fan", 30, "chat", []).allowed
+    assert not check_schedule("fan", 30, "incident", []).allowed                    # sự cố không hẹn giờ
+    assert not check_schedule("fan", 0, "chat", []).allowed and not check_schedule("fan", 90000, "chat", []).allowed
+    one = [{"device": "fan", "delay_s": None}]
+    assert check_schedule("fan", 30, "chat", one).allowed                            # tắt rồi 30s sau bật lại
+    assert not check_schedule("fan", 5, "chat", one).allowed                         # < 10s: nháy
+    assert not check_schedule("fan", None, "chat", one).allowed                      # 2 lệnh cùng lúc 1 thiết bị
+    assert not check_schedule("fan", 60, "chat", one + [{"device": "fan", "delay_s": 30}]).allowed   # lần thứ 3
+    assert check_schedule("light", None, "chat", one).allowed                        # thiết bị khác
+    assert not check_schedule("fan", 30, "chat", [], pending_total=20).allowed

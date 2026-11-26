@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react'
 import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
-import type { DeviceConfig, DeviceName, DeviceStatus, LiveState } from '../../../../shared/types'
-import { DEVICE_LABEL, FAULT_LABEL, SAFETY_HINT, SAFETY_LABEL, SOURCE_LABEL, fmtAgo, fmtDuration, reasonLabel } from '../../../../shared/labels'
+import type { DeviceConfig, DeviceName, DeviceStatus, LiveState, ScheduledCommand } from '../../../../shared/types'
+import { DEVICE_LABEL, FAULT_LABEL, SAFETY_HINT, SAFETY_LABEL, SOURCE_LABEL, fmtAgo, fmtCountdown, fmtDuration, reasonLabel } from '../../../../shared/labels'
 import { fmtWorkHours } from '../../../../shared/config'
-import { devices, errorText } from '../../lib/api'
+import { devices, errorText, schedulesApi } from '../../lib/api'
 import { refresh, live } from '../../lib/live'
 import { useLive, useNow } from '../../lib/hooks'
 import { useColors, type Colors } from '../../lib/theme'
@@ -66,6 +66,7 @@ export default function Dashboard() {
         {(['fan', 'mist', 'light'] as DeviceName[]).map((d) => (
           <DeviceRow key={d} device={d} status={st.devices[d]?.data ?? null} updatedAt={st.devices[d]?.updatedAt ?? null} st={st} cfg={cfg} />
         ))}
+        <ScheduleList st={st} />
       </Card>
       <Card>
         <CardTitle title="Nhiệt độ" sub="30 phút gần nhất · đường đứt = ngưỡng nóng" />
@@ -359,6 +360,66 @@ function LockNote({ c, text }: { c: Colors; text: string }) {
     <View style={{ flexDirection: 'row', gap: 6, backgroundColor: c.warnSoft, borderRadius: 8, padding: 8 }}>
       <Ionicons name="shield-half-outline" size={14} color={c.warn} style={{ marginTop: 1 }} />
       <Text style={{ color: c.warn, fontSize: 12.5, flex: 1 }}>{text}</Text>
+    </View>
+  )
+}
+
+// ------------------------------------------------------------------ lệnh hẹn giờ do trợ lý AI tạo
+
+function ScheduleList({ st }: { st: LiveState }) {
+  const c = useColors()
+  const now = useNow(1000)
+  const [items, setItems] = useState<ScheduledCommand[]>([])
+  const [err, setErr] = useState<string | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [reload, setReload] = useState(0)
+  // nạp lại khi trạng thái thiết bị đổi (lệnh hẹn giờ vừa chạy / bị hủy) + 10 giây/lần
+  const sig = (['fan', 'mist', 'light'] as DeviceName[]).map((d) => st.devices[d]?.updatedAt ?? '').join('|')
+  useEffect(() => {
+    let alive = true
+    const load = () =>
+      schedulesApi
+        .list()
+        .then((x) => alive && (setItems(x), setErr(null)))
+        .catch((e) => alive && setErr(errorText(e)))
+    load()
+    const t = setInterval(load, 10_000)
+    return () => {
+      alive = false
+      clearInterval(t)
+    }
+  }, [sig, reload])
+
+  const cancel = async (id: string) => {
+    setBusy(id)
+    try {
+      await schedulesApi.cancel(id)
+    } catch (e) {
+      setErr(errorText(e))
+    } finally {
+      setBusy(null)
+      setReload((n) => n + 1)
+    }
+  }
+
+  if (!items.length && !err) return null
+  return (
+    <View style={{ borderTopWidth: 1, borderTopColor: c.border, paddingTop: 10, gap: 8 }}>
+      <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+        <Ionicons name="time-outline" size={15} color={c.text2} />
+        <Muted style={{ flex: 1 }}>Lệnh hẹn giờ từ trợ lý AI · lệnh thủ công mới cho cùng thiết bị sẽ hủy lịch</Muted>
+      </View>
+      {err ? <Text style={{ color: c.crit, fontSize: 13 }}>{err}</Text> : null}
+      {items.map((i) => {
+        const left = (new Date(i.run_at).getTime() - now) / 1000
+        return (
+          <View key={i.id} style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+            <Badge tone="info" label={left > 0 ? fmtCountdown(left) : 'đang chạy…'} />
+            <Text style={{ color: c.text, fontSize: 13.5, flex: 1 }}>{i.description}</Text>
+            <Button label="Hủy lịch" disabled={busy === i.id} onPress={() => cancel(i.id)} />
+          </View>
+        )
+      })}
     </View>
   )
 }

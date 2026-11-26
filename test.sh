@@ -1,0 +1,1 @@
+docker exec -it warehouse-mosquitto mosquitto_sub -h localhost -u admin -P admin -t 'warehouse/#' -v

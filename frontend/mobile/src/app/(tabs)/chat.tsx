@@ -20,6 +20,7 @@ interface Proposal {
   kind: string
   description: string
   note?: string | null
+  delay_s?: number | null
 }
 interface Outcome {
   id: string
@@ -30,7 +31,7 @@ interface Outcome {
 type Part =
   | { kind: 'text'; text: string }
   | { kind: 'chart'; block: ChartBlock }
-  | { kind: 'proposal'; proposals: Proposal[]; status: 'pending' | 'approved' | 'rejected' | 'closed' }
+  | { kind: 'proposal'; proposals: Proposal[]; note: string | null; status: 'pending' | 'approved' | 'rejected' | 'closed' }
   | { kind: 'result'; expired: boolean; outcomes: Outcome[] }
   | { kind: 'error'; text: string }
 interface Msg {
@@ -57,7 +58,16 @@ const KIND_TITLE: Record<string, string> = {
   memory: 'Ghi nhớ kiến thức chung về kho',
   alert: 'Phát thông báo',
 }
-const OUTCOME_LABEL: Record<string, string> = { success: 'Đã thực hiện', rejected: 'Không thực hiện', blocked_by_policy: 'Bị lớp an toàn chặn', error: 'Lỗi' }
+const OUTCOME_LABEL: Record<string, string> = {
+  success: 'Đã thực hiện',
+  scheduled: 'Đã hẹn giờ',
+  cancelled: 'Đã hủy lịch',
+  rejected: 'Không thực hiện',
+  blocked_by_policy: 'Bị lớp an toàn chặn',
+  error: 'Lỗi',
+}
+/** Ghi chú của server: lệnh nào chạy cùng lúc / hẹn giờ. */
+const noteOf = (src: Record<string, unknown>) => (typeof src.schedule_note === 'string' ? src.schedule_note : null)
 
 let seq = 1
 
@@ -82,7 +92,7 @@ function fromStored(list: StoredMessage[], pending: Record<string, unknown> | nu
       return {
         id: seq++,
         role: 'assistant',
-        parts: [{ kind: 'proposal', proposals: (src.proposals as Proposal[]) ?? [], status: open ? 'pending' : 'closed' }],
+        parts: [{ kind: 'proposal', proposals: (src.proposals as Proposal[]) ?? [], note: noteOf(src), status: open ? 'pending' : 'closed' }],
       }
     }
     return { id: seq++, role: 'assistant', parts: blocksToParts(m.blocks, m.content) }
@@ -190,7 +200,7 @@ export default function Chat() {
         update(id, (m) => ({
           ...withDraft(m),
           status: undefined,
-          parts: [...withDraft(m).parts, { kind: 'proposal', proposals: (d.proposals as Proposal[]) ?? [], status: 'pending' }],
+          parts: [...withDraft(m).parts, { kind: 'proposal', proposals: (d.proposals as Proposal[]) ?? [], note: noteOf(d), status: 'pending' }],
         }))
       } else if (event === 'result') {
         update(id, (m) => ({ ...m, parts: [...m.parts, { kind: 'result', expired: !!d.expired, outcomes: (d.outcomes as Outcome[]) ?? [] }] }))
@@ -572,7 +582,7 @@ function PartView({
       <View style={{ maxWidth: '92%', backgroundColor: c.surface, borderRadius: 14, padding: 10, gap: 6, borderWidth: 1, borderColor: c.border }}>
         {p.outcomes.map((o) => (
           <View key={o.id} style={{ gap: 3 }}>
-            <Badge tone={o.status === 'success' ? 'ok' : o.status === 'rejected' ? 'neutral' : 'crit'} label={OUTCOME_LABEL[o.status] ?? o.status} />
+            <Badge tone={o.status === 'success' ? 'ok' : o.status === 'scheduled' ? 'info' : o.status === 'rejected' ? 'neutral' : 'crit'} label={OUTCOME_LABEL[o.status] ?? o.status} />
             <Text style={{ color: c.text2, fontSize: 13.5 }}>{o.text || o.description}</Text>
           </View>
         ))}
@@ -592,6 +602,12 @@ function PartView({
           {x.note ? <Muted>Lưu ý: {x.note}</Muted> : null}
         </View>
       ))}
+      {p.note ? (
+        <View style={{ flexDirection: 'row', gap: 6 }}>
+          <Ionicons name="time-outline" size={14} color={c.text2} style={{ marginTop: 2 }} />
+          <Muted style={{ flex: 1 }}>{p.note}</Muted>
+        </View>
+      ) : null}
       {p.status === 'pending' ? (
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <Button style={{ flex: 1 }} kind="primary" label="Đồng ý" disabled={busy} onPress={() => onDecide(true)} />

@@ -45,9 +45,10 @@ Test **không gọi OpenAI**: đồ thị multi-agent chạy với LLM giả có
 | `[CMD]` | Lệnh thiết bị tầng luật gửi |
 | `[INCIDENT]` | Mở / cập nhật / đóng sự cố |
 | `[ESCALATE]` | Leo thang cảnh báo critical chưa ai xem |
+| `[SCHEDULE]` | Lệnh hẹn giờ / nối chuỗi: HẸN (lúc nào), CHẠY (kết quả), HỦY (lý do) |
 | `[CHAT]` | Tin nhắn đến (`user`, `thread`, `trace`), chờ xác nhận, Đồng ý / Hủy, trả lời xong (thời gian) |
 | `[AGENT]` | Supervisor xử lý sự cố, tóm tắt hội thoại dài |
-| `[TOOL]` | **Mọi** tool call: `agent.tool` + trạng thái (`requested`, `pending_confirmation`, `approved`, `rejected`, `success`, `error`, `blocked_by_policy`) + thời gian; lệnh MQTT đã gửi |
+| `[TOOL]` | **Mọi** tool call: `agent.tool` + trạng thái (`requested`, `pending_confirmation`, `approved`, `rejected`, `scheduled`, `cancelled`, `success`, `error`, `blocked_by_policy`) + thời gian; lệnh MQTT đã gửi |
 | `[LLM]` | Token mỗi lần gọi LLM (`agent`, `in`, `out`) |
 | `[VOICE]` | STT / TTS phía server |
 | `[MEMORY]` | Lưu / xóa long-term memory (`namespace/key: nội dung`), lỗi bước trích xuất |
@@ -102,6 +103,7 @@ START ─► supervisor ──(ask_*)──► dispatch ──(có đề xuất)
 - **Mọi tool call đều được ghi** (`app/agents/tools.py`: tool chỉ tạo được qua `make_read_tool` / `make_write_tool`), kể cả lệnh giao việc của Supervisor.
 - **Safety Guard** (`app/agents/safety_guard.py`, code thuần): không bật quạt khi `fire`; không tắt quạt / đèn khi `gas_danger` (đèn: cả `fire`); không bật phun sương khi có khí/khói, độ ẩm ≥ `humHigh` hoặc không có số liệu ẩm gần đây (> 120s); ESP32 offline → chặn; ngưỡng kiểm tra giống firmware. Kiểm tra **2 lần**: khi tạo đề xuất và ngay trước khi gửi MQTT.
 - **Luồng chat:** tool ghi chỉ tạo **đề xuất** (log `pending_confirmation`) → `interrupt` → người dùng bấm → `approved` → gửi lệnh (`source=user`, `user_id`) → chờ ESP32 `ack` tối đa 8s → `success`; Hủy → `rejected`; quá `CONFIRM_TTL_S` → hết hạn. Đang chờ xác nhận thì không nhận tin nhắn mới (409).
+- **Lệnh nối chuỗi / hẹn giờ** ("bật phun sương 30s rồi bật quạt 30s", "10 phút nữa bật quạt", "tắt quạt rồi bật lại"): Control dùng `delay_s` (bắt đầu sau N giây **kể từ lúc bấm Đồng ý**, ≤ 24h); người dùng bấm [Đồng ý] **một lần** cho cả chuỗi. Lệnh không có `delay_s` chạy ngay **cùng lúc**; khung xác nhận luôn có `schedule_note` (code sinh) nói rõ lệnh nào chạy cùng lúc / hẹn giờ. Lệnh hẹn giờ nằm trong RAM (`app/agents/scheduler.py`): đến giờ Safety Guard **kiểm tra lại** rồi mới gửi MQTT (`source=user`, `user_id` người đồng ý); lệnh thủ công mới của người dùng cho cùng thiết bị → **hủy lịch** của thiết bị đó; ai-agent dừng / khởi động lại → lịch bị hủy (nhật ký `cancelled`). Safety Guard `check_schedule`: tối đa 2 lệnh / thiết bị / yêu cầu, cách nhau ≥ 10s (chống nháy relay), luồng sự cố không hẹn giờ, tối đa 20 lịch đang chờ. Log `[SCHEDULE]` (HẸN / CHẠY / HỦY).
 - **Control trả lời mà không gọi tool** (LLM viết "đã tạo đề xuất" nhưng không có đề xuất nào, nên không có nút): `dispatch` phát hiện (`RunContext.tool_calls == 0`, 0 đề xuất) → gọi lại Control **1 lần** kèm `CONTROL_RETRY`; vẫn không gọi tool → Supervisor nhận câu cố định `CONTROL_NO_PROPOSAL` nên không thể nói "đang chờ [Đồng ý]". Trả lời bắt đầu bằng `THIẾU THÔNG TIN:` (cần hỏi lại người dùng) không bị gọi lại. Log `[AGENT]` mức WARNING; `ask_control` trong `tool_call_logs` có `result.retried = true`.
 - **Luồng sự cố** (`AlertDispatcher.enricher`): Supervisor (`mode=incident`, thread = incident id) → Notification soạn nội dung. Control chỉ được tự động bật đèn / bật quạt khi có khí (`source=agent`); đổi ngưỡng luôn bị chặn. `warning`/`info`: quá `LLM_ALERT_TIMEOUT_S` → bản của tầng luật. `critical`: đã gửi ngay, LLM gửi thêm `<type>_analysis`. LLM không hạ mức, không tắt push của `warning`/`critical`.
 - **Short-term memory:** `AsyncPostgresSaver` (bảng `checkpoints*` trong schema `agent`), `thread_id` = hội thoại / sự cố. Quá `CHAT_HISTORY_MAX_MESSAGES` tin → tóm tắt phần cũ (giữ ~một nửa gần nhất).
@@ -138,6 +140,8 @@ START ─► supervisor ──(ask_*)──► dispatch ──(có đề xuất)
 | DELETE | `/chat/threads/{id}?user_id=` | Xóa hội thoại + checkpoint |
 | POST | `/voice/stt` | multipart `file` (≤ 10 MB), `user_id`, `language=vi` → `{"text"}`. Không lưu âm thanh |
 | POST | `/voice/tts` | `{"user_id","text"}` → `audio/mpeg` (bỏ khối biểu đồ, markdown) |
+| GET | `/schedules` | Lệnh hẹn giờ đang chờ `[{id, device, description, run_at, remaining_s, user_id, trace_id, thread_id}]` |
+| DELETE | `/schedules/{id}?user_id=` | Hủy lệnh hẹn giờ (204; 404 nếu đã chạy / đã hủy) |
 | GET | `/memory?user_id=` | Memory cá nhân của người dùng |
 | DELETE | `/memory/{key}?user_id=` | Xóa memory cá nhân (404 nếu không phải của người này) |
 | GET | `/memory/warehouse?kind=facts\|incidents\|feedback&limit&offset` | Memory dùng chung |

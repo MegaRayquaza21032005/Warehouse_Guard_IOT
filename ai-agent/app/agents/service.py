@@ -19,7 +19,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from langgraph.types import Command
 
 from app.agents.charts import parse_blocks
-from app.agents.graph import text_of
+from app.agents.graph import collapse_repeat, text_of
 from app.logging_setup import get_logger
 from app.observability.langfuse import Tracer
 from app.rules.actions import Alert
@@ -232,7 +232,7 @@ class AgentService:
                 await q.put(("confirmation", {**payload, "thread_id": thread_id, "trace_id": trace_id}))
                 return
             final = next((m for m in reversed(snap.values.get("messages", [])) if isinstance(m, AIMessage)), None)
-            text = text_of(final) if final else ""
+            text = collapse_repeat(text_of(final)) if final else ""
             blocks, speech = parse_blocks(text)
             await self.save_message(thread_id, "assistant", text, blocks=blocks, trace_id=trace_id)
             log.info("Trả lời thread=%s trace=%s (%.1fs, %d ký tự)", thread_id, trace_id,

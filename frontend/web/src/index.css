@@ -1548,3 +1548,28 @@ textarea:focus {
 svg.spin {
   animation: spin 0.9s linear infinite;
 }
+
+/* lệnh hẹn giờ (trang Tổng quan) */
+.schedules {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.schedules .sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.schedule-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+.schedule-row .grow {
+  flex: 1;
+  min-width: 0;
+}

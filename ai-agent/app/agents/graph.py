@@ -165,7 +165,7 @@ class WorkerRunner:
                                         model_name=self.model_name, tools=tools, tags=[worker, "nostream"])
             msgs.append(ai)
             if not ai.tool_calls:
-                return text_of(ai) or "(không có nội dung)"
+                return collapse_repeat(text_of(ai)) or "(không có nội dung)"
             calls = ai.tool_calls
             ctx.tool_calls += len(calls)
             if worker in WRITE_WORKERS:           # tool ghi chạy tuần tự
@@ -221,7 +221,40 @@ def _work_hours(settings: Any) -> str:
 
 
 def _public_proposal(p: dict[str, Any]) -> dict[str, Any]:
-    return {k: p.get(k) for k in ("id", "tool", "kind", "args", "description", "note")}
+    out = {k: p.get(k) for k in ("id", "tool", "kind", "args", "description", "note")}
+    out["delay_s"] = (p.get("args") or {}).get("delay_s")
+    return out
+
+
+def _delay(p: dict[str, Any]) -> int:
+    return int((p.get("args") or {}).get("delay_s") or 0) if p.get("kind") == "device" else 0
+
+
+def schedule_note(props: list[dict[str, Any]]) -> str | None:
+    """Ghi chú BẰNG CODE trên khung xác nhận: người dùng thấy rõ lệnh nào chạy cùng lúc / hẹn giờ, kể cả khi LLM
+    diễn đạt sai (vd. nói "sau đó" mà đề xuất lại chạy ngay)."""
+    devices = [p for p in props if p.get("kind") == "device"]
+    now_n = sum(1 for p in devices if not _delay(p))
+    notes = []
+    if now_n >= 2:
+        notes.append(f"{now_n} lệnh không ghi \"Sau …\" sẽ chạy CÙNG LÚC ngay khi bấm Đồng ý.")
+    if any(_delay(p) for p in devices):
+        notes.append("Lệnh \"Sau …\" tính từ lúc bấm Đồng ý; xem / hủy ở trang Tổng quan. Lệnh thủ công mới cho "
+                     "cùng thiết bị sẽ hủy lịch đó; AI Agent khởi động lại thì lịch hẹn bị hủy.")
+    return " ".join(notes) or None
+
+
+def collapse_repeat(text: str) -> str:
+    """LLM thỉnh thoảng trả NGUYÊN VĂN câu trả lời 2 lần liền (đã thấy trên Langfuse) -> giữ 1 bản."""
+    t = text.strip()
+    n = len(t)
+    if n < 40:
+        return text
+    for cut in range(n // 2 - 3, n // 2 + 4):
+        a, b = t[:cut].rstrip(), t[cut:].lstrip()
+        if a and a == b:
+            return a
+    return text
 
 
 # ============================================================================================ đồ thị
@@ -413,10 +446,10 @@ def build_graph(services: Services, caller: LLMCaller, supervisor_llm: Any, supe
     # ---------------------------------------------------------------- confirm (interrupt)
     async def confirm(state: AgentState) -> dict[str, Any]:
         pending = state["pending"] or {}
-        props = pending.get("proposals", [])
+        props = sorted(pending.get("proposals", []), key=_delay)        # theo thứ tự thời gian chạy
         expires_at = pending.get("created_at", time.time()) + s.confirm_ttl_s
         decision = interrupt({"type": "confirmation", "proposals": [_public_proposal(p) for p in props],
-                              "expires_at": expires_at})
+                              "schedule_note": schedule_note(props), "expires_at": expires_at})
         # ---- từ đây chỉ chạy khi người dùng đã bấm Đồng ý / Hủy ----
         approved = bool(decision.get("approved")) if isinstance(decision, dict) else False
         by = decision.get("user_id") if isinstance(decision, dict) else None
@@ -429,14 +462,17 @@ def build_graph(services: Services, caller: LLMCaller, supervisor_llm: Any, supe
             call.id = uuid.UUID(p["id"])
             if approved and not expired:
                 await logger.update(call, "approved", confirmed_by=by)
-                res = await executor.run(p["kind"], p["args"], ctx, confirmed_by=by)
+                if _delay(p) and services.scheduler is not None:
+                    res = services.scheduler.schedule(p, ctx, by)          # chạy sau, Safety Guard kiểm tra lại lúc đó
+                else:
+                    res = await executor.run(p["kind"], p["args"], ctx, confirmed_by=by)
                 await logger.update(call, res["status"], result=res, error=res.get("error"), confirmed_by=by)
             else:
                 reason = "đề xuất đã hết hạn" if (approved and expired) else "người dùng bấm Hủy"
                 await logger.update(call, "rejected", error=reason, confirmed_by=by)
                 res = {"status": "rejected", "text": f"Không thực hiện ({reason}): {p['description']}"}
             outcomes.append({"id": p["id"], "description": p["description"], **{k: res.get(k) for k in
-                                                                                  ("status", "text", "ack")}})
+                                                                                  ("status", "text", "ack", "run_at")}})
         get_stream_writer()({"event": "result", "data": {"approved": approved and not expired, "expired": expired,
                                                          "outcomes": outcomes}})
         msgs = []

@@ -11,12 +11,14 @@ from fastapi import FastAPI
 
 from app.agents.graph import build_graph
 from app.agents.llm import LLMCaller, make_chat_model
+from app.agents.scheduler import Scheduler
 from app.agents.service import AgentService
 from app.agents.tools import Services
 from app.agents.voice import VoiceService
 from app.api.chat import router as chat_router
 from app.api.health import router as health_router
 from app.api.memory import router as memory_router
+from app.api.schedules import router as schedules_router
 from app.backend_client import BackendClient
 from app.config import get_settings
 from app.db import migrate, open_checkpointer, open_pool
@@ -67,7 +69,7 @@ async def lifespan(app: FastAPI):
     usage = UsageRecorder(pool)
 
     # ---- Multi-agent (giai đoạn 4). Lỗi ở đây KHÔNG được làm dừng tầng luật.
-    agent, cp_pool, checkpointer, memory, extractor = None, None, None, None, None
+    agent, cp_pool, checkpointer, memory, extractor, scheduler = None, None, None, None, None, None
     if not s.llm_enabled:
         log.warning("Chưa có OPENAI_API_KEY — tắt chatbot / multi-agent, chỉ chạy tầng luật")
     else:
@@ -94,6 +96,14 @@ async def lifespan(app: FastAPI):
             tool_logger = ToolCallLogger(pool)
             services = Services(settings=s, backend=backend, mqtt=mqtt, engine=engine, runtime=runtime,
                                 dispatcher=dispatcher, logger=tool_logger, pool=pool, memory=memory)
+            # Lệnh hẹn giờ / nối chuỗi: chỉ trong RAM -> lịch của lần chạy trước coi như đã hủy
+            stale = await tool_logger.close_stale("scheduled", "cancelled",
+                                                  "ai-agent khởi động lại — lịch hẹn trong RAM bị hủy")
+            if stale:
+                log.warning("Hủy %d lệnh hẹn giờ còn treo từ lần chạy trước (ai-agent đã khởi động lại)", stale)
+            scheduler = Scheduler(services)
+            services.scheduler = scheduler
+            runtime.on_command = scheduler.on_command
             sup_llm = make_chat_model(s, s.openai_model)
             wrk_llm = sup_llm if s.worker_model == s.openai_model else make_chat_model(s, s.worker_model)
             caller = LLMCaller(usage)
@@ -115,7 +125,7 @@ async def lifespan(app: FastAPI):
             agent = None
 
     app.state.settings, app.state.agent, app.state.voice = s, agent, VoiceService(s, usage)
-    app.state.memory, app.state.extractor = memory, extractor
+    app.state.memory, app.state.extractor, app.state.scheduler = memory, extractor, scheduler
     maintenance = asyncio.create_task(maintenance_loop(s, pool, cp_pool, checkpointer), name="maintenance")
     app.state.pool, app.state.mqtt, app.state.tracer, app.state.runtime = pool, mqtt, tracer, runtime
     mqtt.start()
@@ -126,6 +136,8 @@ async def lifespan(app: FastAPI):
     finally:
         log.info("Đang dừng...")
         maintenance.cancel()
+        if scheduler is not None:
+            await scheduler.shutdown()
         await runtime.stop()
         mqtt.stop()
         await backend.close()
@@ -141,3 +153,4 @@ app = FastAPI(title="Warehouse AI Agent", version="0.5.0", lifespan=lifespan)
 app.include_router(health_router)
 app.include_router(chat_router)
 app.include_router(memory_router)
+app.include_router(schedules_router)

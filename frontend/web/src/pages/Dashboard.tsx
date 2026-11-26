@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import {
   Activity,
   CheckCircle2,
+  Clock,
   Droplets,
   Fan,
   Flame,
@@ -15,11 +16,11 @@ import {
   Waves,
   Wind,
 } from 'lucide-react'
-import type { DeviceConfig, DeviceName, DeviceStatus, LiveState, WorkHours } from '../types'
+import type { DeviceConfig, DeviceName, DeviceStatus, LiveState, ScheduledCommand, WorkHours } from '../types'
 import { useLive, useNow } from '../lib/hooks'
 import { fmtWorkHours } from '../lib/config'
-import { DEVICE_LABEL, FAULT_LABEL, SAFETY_HINT, SAFETY_LABEL, SOURCE_LABEL, fmtAgo, fmtDuration, reasonLabel } from '../lib/labels'
-import { devices as devicesApi, errorText } from '../api'
+import { DEVICE_LABEL, FAULT_LABEL, SAFETY_HINT, SAFETY_LABEL, SOURCE_LABEL, fmtAgo, fmtCountdown, fmtDuration, reasonLabel } from '../lib/labels'
+import { devices as devicesApi, errorText, schedulesApi } from '../api'
 import AlertList from '../components/AlertList'
 import { ClimateStack, Mq135Chart, type TimeRow } from '../components/charts/Charts'
 
@@ -56,6 +57,7 @@ export default function Dashboard() {
             <DeviceCard key={d} device={d} status={live.devices[d]?.data ?? null} updatedAt={live.devices[d]?.updatedAt ?? null} live={live} cfg={cfg} />
           ))}
         </div>
+        <ScheduleList live={live} />
       </div>
 
       <div className="grid cols-3">
@@ -417,6 +419,66 @@ function DeviceCard({
       <div style={{ fontSize: 12, minHeight: 18, color: result?.startsWith('ESP32') ? 'var(--ok)' : result ? 'var(--warn)' : 'var(--text-3)' }}>
         {pending ? (offline ? 'Đã gửi — ESP32 đang mất kết nối…' : 'Đang chờ ESP32 xác nhận…') : (result ?? (duration ? `Lệnh thủ công tự hết hạn sau ${fmtDuration(duration)}` : ''))}
       </div>
+    </div>
+  )
+}
+
+// ------------------------------------------------------------------ lệnh hẹn giờ do trợ lý AI tạo
+
+function ScheduleList({ live }: { live: LiveState }) {
+  const [items, setItems] = useState<ScheduledCommand[]>([])
+  const [err, setErr] = useState<string | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+  const now = useNow(1000)
+  // nạp lại khi trạng thái thiết bị đổi (lệnh hẹn giờ vừa chạy / bị hủy) + 10 giây/lần
+  const sig = (['fan', 'mist', 'light'] as DeviceName[]).map((d) => live.devices[d]?.updatedAt ?? '').join('|')
+  const [reload, setReload] = useState(0)
+  useEffect(() => {
+    let alive = true
+    const load = () =>
+      schedulesApi
+        .list()
+        .then((x) => alive && (setItems(x), setErr(null)))
+        .catch((e) => alive && setErr(errorText(e)))
+    load()
+    const t = setInterval(load, 10_000)
+    return () => {
+      alive = false
+      clearInterval(t)
+    }
+  }, [sig, reload])
+
+  const cancel = async (id: string) => {
+    setBusy(id)
+    try {
+      await schedulesApi.cancel(id)
+    } catch (e) {
+      setErr(errorText(e))
+    } finally {
+      setBusy(null)
+      setReload((n) => n + 1)
+    }
+  }
+
+  if (!items.length && !err) return null
+  return (
+    <div className="schedules">
+      <div className="sub">
+        <Clock size={14} /> Lệnh hẹn giờ từ trợ lý AI · lệnh thủ công mới cho cùng thiết bị sẽ hủy lịch
+      </div>
+      {err && <div className="faint" style={{ color: 'var(--crit)' }}>{err}</div>}
+      {items.map((i) => {
+        const left = (new Date(i.run_at).getTime() - now) / 1000
+        return (
+          <div key={i.id} className="schedule-row">
+            <span className="badge info">{left > 0 ? fmtCountdown(left) : 'đang chạy…'}</span>
+            <span className="grow">{i.description}</span>
+            <button className="btn sm ghost" disabled={busy === i.id} onClick={() => cancel(i.id)}>
+              Hủy lịch
+            </button>
+          </div>
+        )
+      })}
     </div>
   )
 }

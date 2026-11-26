@@ -49,6 +49,8 @@ class RuleRuntime:
         self._ack_waiters: dict[str, asyncio.Future] = {}
         # Giai đoạn 5: gọi khi sự cố ĐÓNG (sau khi đã lưu DB) -> bước trích xuất memory tóm tắt sự cố
         self.on_incident_closed = None
+        # Lệnh hẹn giờ (Scheduler): nhận mọi warehouse/cmd/<thiết bị> để hủy lịch khi người dùng ra lệnh mới
+        self.on_command = None
 
     def start(self) -> None:
         self._tasks = [asyncio.create_task(self.consume(), name="rules-consume"),
@@ -72,6 +74,11 @@ class RuleRuntime:
             except Exception:  # noqa: BLE001 — một bản tin lỗi không được làm dừng tầng luật
                 log.exception("Lỗi xử lý %s", topic)
             self._resolve_ack(data)
+            if self.on_command is not None and topic.startswith("warehouse/cmd/"):
+                try:
+                    self.on_command(topic, data)
+                except Exception:  # noqa: BLE001
+                    log.exception("Lỗi xử lý lệnh %s cho bộ hẹn giờ", topic)
 
     async def ticker(self) -> None:
         while True:

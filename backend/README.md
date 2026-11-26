@@ -113,6 +113,8 @@ Java BE gắn `user_id` (và `username`) **lấy từ JWT** rồi gọi ai-agent
 | POST | `/api/voice/stt` | multipart `file` (≤ 10 MB) → `{"text"}`. Chỉ dùng khi thiết bị không tự nhận dạng được; không lưu âm thanh |
 | POST | `/api/voice/tts` | `{"text"}` (≤ 4000 ký tự) → `audio/mpeg` |
 | GET | `/api/agent/tool-calls?traceId&threadId&agent&tool&status&flow&from&to&page&size` | Nhật ký tool call. `ADMIN` xem tất cả (+ `userId`); người dùng thường chỉ thấy của mình + luồng sự cố |
+| GET | `/api/schedules` | Lệnh thiết bị **hẹn giờ / nối chuỗi** tạo từ chatbot, đang chờ (mọi người dùng đều thấy — thiết bị dùng chung): `[{id, device, description, run_at, remaining_s, user_id, trace_id, thread_id}]` |
+| DELETE | `/api/schedules/{id}` | Hủy lệnh hẹn giờ (204; 404 `not_found` nếu đã chạy / đã hủy). ai-agent ghi người hủy vào nhật ký |
 
 ### Long-term memory — `/api/memories` (trung gian tới AI Agent)
 

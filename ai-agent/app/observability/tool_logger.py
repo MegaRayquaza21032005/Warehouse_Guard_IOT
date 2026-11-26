@@ -93,6 +93,20 @@ class ToolCallLogger:
         except Exception as e:  # noqa: BLE001
             log.error("Không cập nhật được nhật ký %s.%s: %s", call.agent, call.tool, e)
 
+    async def close_stale(self, status_from: str, status_to: str, error: str) -> int:
+        """Lúc khởi động: dòng còn treo ở status_from (vd. lệnh hẹn giờ của lần chạy trước) -> status_to."""
+        if self.pool is None:
+            return 0
+        try:
+            async with self.pool.connection() as conn:
+                cur = await conn.execute(
+                    """UPDATE agent.tool_call_logs SET status = %s, error = %s, finished_at = now()
+                       WHERE status = %s""", (status_to, error, status_from))
+                return cur.rowcount or 0
+        except Exception as e:  # noqa: BLE001
+            log.error("Không dọn được nhật ký %s: %s", status_from, e)
+            return 0
+
     @asynccontextmanager
     async def track(self, call: ToolCall):
         """async with logger.track(call) as c: ... ; ném lỗi -> status error; bình thường -> success."""

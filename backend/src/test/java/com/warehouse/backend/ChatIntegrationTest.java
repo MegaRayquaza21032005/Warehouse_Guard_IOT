@@ -194,6 +194,20 @@ class ChatIntegrationTest extends IntegrationTestBase {
     }
 
     @Test
+    void schedulesAreProxiedWithUserFromJwt() throws Exception {
+        mvc.perform(get("/api/schedules")).andExpect(status().isUnauthorized());
+        String auth = "Bearer " + registerAndGetToken("thanh");
+        mvc.perform(get("/api/schedules").header("Authorization", auth)).andExpect(status().isOk());
+        assertThat(received.get("/schedules").get("method")).isEqualTo("GET");
+        String id = "0f8b6a4e-2a64-4f7e-9d7e-3a1f2b3c4d5e";
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/api/schedules/" + id)
+                .header("Authorization", auth)).andExpect(status().isNoContent());
+        assertThat(received.get("/schedules/" + id).get("query")).isEqualTo("user_id=1");
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                .delete("/api/schedules/abc;drop").header("Authorization", auth)).andExpect(status().isBadRequest());
+    }
+
+    @Test
     void memoryEndpointsUseUserFromJwt() throws Exception {
         String auth = "Bearer " + registerAndGetToken("thanh");
         mvc.perform(get("/api/memories").header("Authorization", auth)).andExpect(status().isOk());

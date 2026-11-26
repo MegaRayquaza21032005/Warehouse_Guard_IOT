@@ -140,6 +140,22 @@ export interface MemoryItem {
   created_by?: number | string | null
 }
 
+/**
+ * Lệnh thiết bị hẹn giờ / nối chuỗi do chatbot tạo (`GET /api/schedules`) — nằm trong RAM của AI Agent,
+ * mất khi AI Agent khởi động lại. Lệnh thủ công mới cho cùng thiết bị sẽ hủy lịch.
+ */
+export interface ScheduledCommand {
+  id: string
+  device: DeviceName
+  description: string
+  run_at: string
+  created_at: string
+  remaining_s: number
+  user_id: number | null
+  trace_id: string
+  thread_id: string | null
+}
+
 export interface StatsQuery {
   metric: string
   from: string

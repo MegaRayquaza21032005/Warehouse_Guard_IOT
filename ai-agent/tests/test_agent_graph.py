@@ -3,6 +3,7 @@
 Kiểm tra: xác nhận / hủy lệnh, Safety Guard chặn, quyền tối thiểu, luồng sự cố, mọi tool call chung trace_id.
 """
 
+import asyncio
 import time
 from datetime import time as dtime
 from typing import Any
@@ -14,7 +15,8 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
 from app.agents import prompts
-from app.agents.graph import build_graph, sanitize, split_for_summary
+from app.agents.graph import build_graph, collapse_repeat, sanitize, split_for_summary
+from app.agents.scheduler import Scheduler
 from app.agents.llm import LLMCaller
 from app.agents.tools import Services
 from app.config import Settings
@@ -122,13 +124,15 @@ def env():
     mqtt, logger, dispatcher = FakeMqtt(), MemLogger(), FakeDispatcher()
     services = Services(settings=settings, backend=FakeBackend(), mqtt=mqtt, engine=engine, runtime=FakeRuntime(),
                         dispatcher=dispatcher, logger=logger, memory=memory)
+    services.scheduler = Scheduler(services)
 
     def make(sup: list[AIMessage], wrk: list[AIMessage]):
         s_llm, w_llm = ScriptedLLM(sup), ScriptedLLM(wrk)
         g = build_graph(services, LLMCaller(UsageRecorder(None)), s_llm, "sup", w_llm, "wrk", InMemorySaver())
         return g, s_llm, w_llm
 
-    return {"make": make, "mqtt": mqtt, "logger": logger, "engine": engine, "dispatcher": dispatcher, "memory": memory}
+    return {"make": make, "mqtt": mqtt, "logger": logger, "engine": engine, "dispatcher": dispatcher, "memory": memory,
+            "scheduler": services.scheduler}
 
 
 def chat_input(text: str, trace: str = "c-test1", thread: str = "t-1") -> dict:
@@ -214,6 +218,117 @@ async def test_control_asking_for_details_is_not_retried(env):
     assert "__interrupt__" not in out and len(w_llm.inputs) == 1             # không gọi lại
     tm = [m for m in out["messages"] if isinstance(m, ToolMessage)][-1]
     assert tm.content.startswith("THIẾU THÔNG TIN")
+
+
+async def test_chain_runs_first_now_and_schedules_the_next(env):
+    """"bật phun sương 1s rồi bật quạt" -> 1 lần Đồng ý: phun sương chạy ngay, quạt hẹn giờ, đến giờ mới gửi."""
+    g, _, _ = env["make"](
+        [call("ask_control", {"task": "phun sương 1 giây, sau đó bật quạt 30 giây"}, "h1"), say("Đã xong.")],
+        [AIMessage(content="", tool_calls=[
+            {"name": "control_fan", "args": {"state": "on", "duration_s": 30, "delay_s": 1}, "id": "w2", "type": "tool_call"},
+            {"name": "control_mist", "args": {"state": "on", "duration_s": 1}, "id": "w1", "type": "tool_call"}]),
+         say("Đã tạo đề xuất")])
+    out = await g.ainvoke(chat_input("bật phun sương 1s rồi bật quạt 30s"), CFG)
+    intr = out["__interrupt__"][0].value
+    assert [p["tool"] for p in intr["proposals"]] == ["control_mist", "control_fan"]        # sắp theo thời gian
+    assert intr["proposals"][1]["description"].startswith("Sau 1 giây: bật quạt")
+    assert intr["proposals"][1]["delay_s"] == 1 and "Sau" in intr["schedule_note"]
+
+    out = await g.ainvoke(Command(resume={"approved": True, "user_id": 7}), CFG)
+    assert [t for t, _, _ in env["mqtt"].sent] == ["warehouse/cmd/mist"]                    # quạt CHƯA gửi
+    assert [o["status"] for o in out["outcomes"]] == ["success", "scheduled"]
+    sched = env["scheduler"].list()
+    assert len(sched) == 1 and sched[0]["device"] == "fan" and sched[0]["user_id"] == 7
+    fan_row = next(r for r in env["logger"].rows.values() if r["tool"] == "control_fan")
+    assert fan_row["status"] == "scheduled"
+
+    await asyncio.sleep(1.3)
+    topic, payload, _ = env["mqtt"].sent[-1]
+    assert topic == "warehouse/cmd/fan" and payload["source"] == "user" and payload["user_id"] == "7"
+    assert payload["duration_s"] == 30 and "delay_s" not in payload and payload["trace_id"].startswith("c-test1-")
+    assert fan_row["history"][-2:] == ["scheduled", "success"] and env["scheduler"].list() == []
+
+
+async def test_scheduled_command_rechecks_guard_when_it_fires(env):
+    g, _, _ = env["make"](
+        [call("ask_control", {"task": "1 giây nữa bật quạt"}, "h1"), say("ok")],
+        [call("control_fan", {"state": "on", "delay_s": 1}, "w1"), say("Đã tạo đề xuất")])
+    await g.ainvoke(chat_input("1 giây nữa bật quạt"), CFG)
+    await g.ainvoke(Command(resume={"approved": True, "user_id": 7}), CFG)
+    env["engine"].safety = "fire"                                    # trong lúc chờ: nghi cháy
+    await asyncio.sleep(1.3)
+    assert env["mqtt"].sent == []
+    row = next(r for r in env["logger"].rows.values() if r["tool"] == "control_fan")
+    assert row["status"] == "blocked_by_policy"
+
+
+async def test_new_manual_command_cancels_pending_schedule(env):
+    g, _, _ = env["make"](
+        [call("ask_control", {"task": "tắt quạt rồi 1 phút sau bật lại"}, "h1"), say("ok")],
+        [AIMessage(content="", tool_calls=[
+            {"name": "control_fan", "args": {"state": "off"}, "id": "w1", "type": "tool_call"},
+            {"name": "control_fan", "args": {"state": "on", "delay_s": 60}, "id": "w2", "type": "tool_call"}]),
+         say("Đã tạo đề xuất")])
+    await g.ainvoke(chat_input("tắt quạt rồi 1 phút sau bật lại"), CFG)
+    await g.ainvoke(Command(resume={"approved": True, "user_id": 7}), CFG)
+    sch = env["scheduler"]
+    _, own, _ = env["mqtt"].sent[0]
+    sch.on_command("warehouse/cmd/fan", own)                         # lệnh của chính chuỗi này -> giữ lịch
+    sch.on_command("warehouse/cmd/light", {"state": "on", "source": "user", "trace_id": "x"})   # thiết bị khác
+    sch.on_command("warehouse/cmd/fan", {"state": "on", "source": "rule", "trace_id": "r-1"})   # không phải user
+    await asyncio.sleep(0)
+    assert len(sch.list()) == 1
+    sch.on_command("warehouse/cmd/fan", {"state": "off", "source": "user", "trace_id": "btn-1"})  # nút trên app
+    await asyncio.sleep(0.05)
+    assert sch.list() == []
+    row = next(r for r in env["logger"].rows.values() if r["tool"] == "control_fan" and r["status"] == "cancelled")
+    assert "lệnh thủ công mới" in row["error"]
+
+
+async def test_cancel_schedule_by_user(env):
+    g, _, _ = env["make"](
+        [call("ask_control", {"task": "10 phút nữa bật đèn"}, "h1"), say("ok")],
+        [call("control_light", {"state": "on", "delay_s": 600}, "w1"), say("Đã tạo đề xuất")])
+    await g.ainvoke(chat_input("10 phút nữa bật đèn"), CFG)
+    await g.ainvoke(Command(resume={"approved": True, "user_id": 7}), CFG)
+    sch = env["scheduler"]
+    item = sch.list()[0]
+    assert 595 <= item["remaining_s"] <= 600
+    assert await sch.cancel(item["id"], reason="Người dùng hủy lịch", by=7) is True
+    assert await sch.cancel(item["id"], reason="x") is False and sch.list() == [] and env["mqtt"].sent == []
+
+
+async def test_flicker_request_is_blocked_by_guard(env):
+    g, _, _ = env["make"](
+        [call("ask_control", {"task": "bật tắt đèn 3 lần"}, "h1"), say("Không nháy đèn được.")],
+        [AIMessage(content="", tool_calls=[
+            {"name": "control_light", "args": {"state": "on"}, "id": "w1", "type": "tool_call"},
+            {"name": "control_light", "args": {"state": "off", "delay_s": 5}, "id": "w2", "type": "tool_call"},
+            {"name": "control_light", "args": {"state": "on", "delay_s": 20}, "id": "w3", "type": "tool_call"}]),
+         say("Bị chặn")])
+    out = await g.ainvoke(chat_input("bật tắt đèn 3 lần"), CFG)
+    statuses = sorted(r["status"] for r in env["logger"].rows.values() if r["tool"] == "control_light")
+    assert statuses == ["blocked_by_policy", "blocked_by_policy", "pending_confirmation"]   # cách 5s + lần thứ 3
+    blocked = [r["error"] for r in env["logger"].rows.values() if r["status"] == "blocked_by_policy"]
+    assert any("cách nhau" in e for e in blocked) and any("Tối đa 2 lệnh" in e for e in blocked)
+    assert len(out["__interrupt__"][0].value["proposals"]) == 1
+
+
+async def test_parallel_commands_get_same_time_note(env):
+    g, _, _ = env["make"](
+        [call("ask_control", {"task": "bật quạt và đèn"}, "h1"), say("ok")],
+        [AIMessage(content="", tool_calls=[
+            {"name": "control_fan", "args": {"state": "on"}, "id": "w1", "type": "tool_call"},
+            {"name": "control_light", "args": {"state": "on"}, "id": "w2", "type": "tool_call"}]),
+         say("Đã tạo đề xuất")])
+    out = await g.ainvoke(chat_input("bật quạt và đèn"), CFG)
+    assert "CÙNG LÚC" in out["__interrupt__"][0].value["schedule_note"]
+
+
+def test_collapse_repeat():
+    a = "Bạn muốn bật thiết bị nào?\n- Quạt\n- Đèn"
+    assert collapse_repeat(a + "\n" + a) == a and collapse_repeat(a + a) == a
+    assert collapse_repeat(a) == a and collapse_repeat("ok ok") == "ok ok"
 
 
 async def test_cancel_does_nothing_but_is_logged(env):

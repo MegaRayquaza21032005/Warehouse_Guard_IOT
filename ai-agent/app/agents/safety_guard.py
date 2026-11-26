@@ -13,6 +13,10 @@ DEVICES = ("fan", "mist", "light")
 DEVICE_VI = {"fan": "quạt", "mist": "phun sương", "light": "đèn"}
 MAX_DURATION_S = 86400
 CLIMATE_STALE_S = 120       # số liệu nhiệt/ẩm cũ hơn -> coi như không biết
+MAX_DELAY_S = 86400          # lệnh hẹn giờ: bắt đầu sau tối đa 24 giờ
+MAX_ACTIONS_PER_DEVICE = 2   # mỗi yêu cầu: tối đa 2 lệnh cho cùng 1 thiết bị (vd. tắt rồi bật lại)
+MIN_GAP_S = 10               # 2 lệnh cùng thiết bị trong 1 yêu cầu phải cách nhau >= 10s
+MAX_PENDING_SCHEDULES = 20   # số lệnh hẹn giờ đang chờ tối đa (toàn hệ thống)
 
 # Giống firmware (logic.h validateConfig) và Java BE (ConfigService): khóa -> (min, max, số nguyên?)
 CONFIG_RULES: dict[str, tuple[float, float, bool]] = {
@@ -117,6 +121,29 @@ def check_incident_action(device: str, ctx: GuardContext, *, state: str | None =
         return Verdict.block("Luồng sự cố chỉ được tự động bật đèn, hoặc bật quạt khi có khí "
                              "— hành động khác cần người dùng ra lệnh")
     return check_device(device, ctx, state=state, mode=mode, duration_s=duration_s)
+
+
+def check_schedule(device: str, delay_s: int | None, flow: str, siblings: list[dict[str, Any]],
+                   pending_total: int = 0) -> Verdict:
+    """Lệnh nối chuỗi / hẹn giờ trong MỘT yêu cầu. siblings = các đề xuất thiết bị đã tạo trước đó trong yêu cầu
+    (mỗi cái có device, delay_s). Chặn nháy / bật-tắt lặp bằng relay (relay cơ mòn nhanh — CLAUDE.md 5.2)."""
+    if delay_s is not None:
+        if flow != "chat":
+            return Verdict.block("Luồng sự cố không hẹn giờ — hành động tự động phải làm ngay")
+        if not isinstance(delay_s, int) or not 1 <= delay_s <= MAX_DELAY_S:
+            return Verdict.block(f"delay_s phải là số nguyên 1–{MAX_DELAY_S}")
+        if pending_total >= MAX_PENDING_SCHEDULES:
+            return Verdict.block(f"Đã có {pending_total} lệnh hẹn giờ đang chờ (tối đa {MAX_PENDING_SCHEDULES})")
+    same = [x for x in siblings if x.get("device") == device]
+    if len(same) >= MAX_ACTIONS_PER_DEVICE:
+        return Verdict.block(f"Tối đa {MAX_ACTIONS_PER_DEVICE} lệnh cho {DEVICE_VI.get(device, device)} trong một "
+                             "yêu cầu — không nháy / bật tắt lặp lại bằng relay (relay cơ mòn nhanh)")
+    mine = delay_s or 0
+    for x in same:
+        if abs((x.get("delay_s") or 0) - mine) < MIN_GAP_S:
+            return Verdict.block(f"Hai lệnh cho {DEVICE_VI.get(device, device)} phải cách nhau ít nhất {MIN_GAP_S} "
+                                 "giây (dùng delay_s cho lệnh sau)")
+    return Verdict.ok()
 
 
 def check_config(patch: dict[str, Any], current: dict[str, Any]) -> tuple[Verdict, dict[str, Any]]:

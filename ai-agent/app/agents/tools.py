@@ -51,6 +51,7 @@ class RunContext:
     alert_content: dict[str, Any] | None = None
     current_call_id: str | None = None         # tool_call_id của lệnh giao việc đang chạy
     tool_calls: int = 0                        # số tool worker đã gọi (phát hiện "nói đã làm mà không gọi tool")
+    device_attempts: list[dict[str, Any]] = field(default_factory=list)   # mọi lệnh thiết bị đã thử (kể cả bị chặn)
 
 
 @dataclass
@@ -65,6 +66,7 @@ class Services:
     logger: ToolCallLogger
     pool: Any = None
     memory: Any = None           # MemoryService (giai đoạn 5); None = chưa có long-term memory
+    scheduler: Any = None        # Scheduler — lệnh thiết bị hẹn giờ / nối chuỗi (None = không hỗ trợ)
 
     def guard_context(self) -> guard.GuardContext:
         e = self.engine
@@ -104,11 +106,22 @@ def _new_cmd_trace(ctx: RunContext) -> str:
     return f"{ctx.trace_id}-{uuid.uuid4().hex[:4]}"
 
 
-def _describe_device(device: str, state: str | None, mode: str | None, duration_s: int | None) -> str:
+def fmt_secs(n: int) -> str:
+    """90 -> "1 phút 30 giây", 3600 -> "1 giờ"."""
+    h, rem = divmod(int(n), 3600)
+    m, sec = divmod(rem, 60)
+    parts = [f"{h} giờ"] * bool(h) + [f"{m} phút"] * bool(m) + [f"{sec} giây"] * bool(sec)
+    return " ".join(parts) or "0 giây"
+
+
+def _describe_device(device: str, state: str | None, mode: str | None, duration_s: int | None,
+                     delay_s: int | None = None) -> str:
     name = guard.DEVICE_VI[device]
     text = f"Trả {name} về chế độ tự động" if mode == "auto" else f"{DEVICE_VERB[state]} {name} (thủ công)"
     if duration_s:
-        text += f" trong {duration_s // 60} phút" if duration_s % 60 == 0 else f" trong {duration_s} giây"
+        text += f" trong {fmt_secs(duration_s)} rồi về tự động"
+    if delay_s:
+        text = f"Sau {fmt_secs(delay_s)}: {text[0].lower()}{text[1:]}"
     return text
 
 
@@ -322,7 +335,11 @@ class SearchArgs(BaseModel):
 class DeviceCmdArgs(BaseModel):
     state: Literal["on", "off"] | None = Field(None, description="Bật / tắt (chế độ thủ công)")
     mode: Literal["auto"] | None = Field(None, description="Trả về chế độ tự động (không dùng chung với state)")
-    duration_s: int | None = Field(None, ge=1, le=86400, description="Tự về auto sau N giây (tùy chọn)")
+    duration_s: int | None = Field(None, ge=1, le=86400,
+                                   description="Hết N giây thì thiết bị TỰ VỀ CHẾ ĐỘ TỰ ĐỘNG (không phải đảo trạng thái)")
+    delay_s: int | None = Field(None, ge=1, le=86400,
+                                description="Hẹn giờ: bắt đầu sau N giây kể từ lúc người dùng bấm Đồng ý (lệnh nối "
+                                            "chuỗi \"sau đó\", \"X phút nữa\"). Không có = làm ngay")
 
 
 class ThresholdArgs(BaseModel):
@@ -398,6 +415,8 @@ def build_monitor_tools(s: Services, ctx: RunContext) -> list[StructuredTool]:
                     "safety": snap["safety"], "latest": snap["latest"], "online": snap["online"],
                     "motion": snap["motion"], "devices": snap.get("devices"), "thresholds": snap["thresholds"]}
         state["now"] = datetime.now(VN).isoformat(timespec="seconds")
+        if s.scheduler is not None:
+            state["scheduled_commands"] = s.scheduler.list()     # lệnh hẹn giờ đang chờ (RAM của ai-agent)
         return state
 
     async def get_sensor_history(kind: str, from_time: str | None = None, to_time: str | None = None,
@@ -531,13 +550,22 @@ def build_analyst_tools(s: Services, ctx: RunContext) -> list[StructuredTool]:
 
 def build_control_tools(s: Services, ctx: RunContext, ex: ActionExecutor) -> list[StructuredTool]:
     def device_plan(device: str):
-        def plan(state: str | None = None, mode: str | None = None, duration_s: int | None = None) -> WritePlan:
+        def plan(state: str | None = None, mode: str | None = None, duration_s: int | None = None,
+                 delay_s: int | None = None) -> WritePlan:
             g = s.guard_context()
             check = guard.check_device if ctx.flow == "chat" else guard.check_incident_action
             v = check(device, g, state=state, mode=mode, duration_s=duration_s)
-            args = {"device": device, "state": state, "mode": mode, "duration_s": duration_s}
+            if v.allowed:
+                if delay_s is not None and s.scheduler is None:
+                    v = guard.Verdict.block("Chưa bật bộ hẹn giờ — chỉ làm được lệnh ngay")
+                else:
+                    sv = guard.check_schedule(device, delay_s, ctx.flow, ctx.device_attempts,
+                                              s.scheduler.pending() if s.scheduler is not None else 0)
+                    v = sv if not sv.allowed else v
+            ctx.device_attempts.append({"device": device, "delay_s": delay_s})   # kể cả bị chặn: chống nháy
+            args = {"device": device, "state": state, "mode": mode, "duration_s": duration_s, "delay_s": delay_s}
             return WritePlan("device", v, {k: x for k, x in args.items() if x is not None},
-                             _describe_device(device, state, mode, duration_s) if v.allowed else device)
+                             _describe_device(device, state, mode, duration_s, delay_s) if v.allowed else device)
         return plan
 
     def threshold_plan(**changes: Any) -> WritePlan:
@@ -550,8 +578,9 @@ def build_control_tools(s: Services, ctx: RunContext, ex: ActionExecutor) -> lis
         return WritePlan("config", v, {"changes": changes}, desc)
 
     W = make_write_tool
-    tools = [W(s, ctx, ex, "control", f"control_{d}", f"Điều khiển {guard.DEVICE_VI[d]}: state on/off hoặc mode auto.",
-               DeviceCmdArgs, device_plan(d)) for d in guard.DEVICES]
+    tools = [W(s, ctx, ex, "control", f"control_{d}",
+               f"Điều khiển {guard.DEVICE_VI[d]}: state on/off hoặc mode auto; delay_s = hẹn giờ / lệnh sau "
+               "trong chuỗi.", DeviceCmdArgs, device_plan(d)) for d in guard.DEVICES]
     tools.append(W(s, ctx, ex, "control", "update_thresholds",
                    "Đổi ngưỡng cảnh báo của ESP32 (chỉ gửi khóa cần đổi). Chỉ trong luồng chat, cần xác nhận.",
                    ThresholdArgs, threshold_plan))

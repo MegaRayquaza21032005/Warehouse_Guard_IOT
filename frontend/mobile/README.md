@@ -50,7 +50,7 @@ iOS: `getDevicePushTokenAsync` trả token APNs, còn backend hiện chỉ gửi
 
 | Route | Nội dung |
 |-------|----------|
-| `(tabs)/index` | Tổng quan: dải cảnh báo nguy hiểm chưa xem, trạng thái an toàn, 4 cảm biến, điều khiển 3 thiết bị (chờ ESP32 `ack`), biểu đồ 30 phút |
+| `(tabs)/index` | Tổng quan: dải cảnh báo nguy hiểm chưa xem, trạng thái an toàn, 4 cảm biến, điều khiển 3 thiết bị (chờ ESP32 `ack`), **lệnh hẹn giờ** từ trợ lý AI (đếm ngược, Hủy lịch), biểu đồ 30 phút |
 | `(tabs)/alerts` | Cảnh báo: lọc theo mức / chưa xem, đánh dấu đã xem hết, kéo để nạp lại |
 | `alert/[id]` | Chi tiết cảnh báo (màn hình mở từ push): đã xem, phản hồi đúng / báo giả |
 | `(tabs)/chat` | Trợ lý AI: SSE (`expo/fetch` đọc stream), biểu đồ trong chat, [Đồng ý] / [Hủy], lịch sử hội thoại, mic, đọc thành tiếng |

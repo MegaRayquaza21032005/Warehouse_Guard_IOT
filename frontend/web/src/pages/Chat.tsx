@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Bot, Check, Loader2, Mic, MicOff, Plus, Send, ShieldCheck, Square, Trash2, TriangleAlert, User as UserIcon, Volume2, X } from 'lucide-react'
+import { Bot, Check, Clock, Loader2, Mic, MicOff, Plus, Send, ShieldCheck, Square, Trash2, TriangleAlert, User as UserIcon, Volume2, X } from 'lucide-react'
 import type { ChartBlock } from '../types'
 import { useAuth, useAutoRead } from '../lib/hooks'
 import { chatApi, errorText, voiceApi, type ChatThread, type StoredMessage } from '../api'
@@ -15,6 +15,7 @@ interface Proposal {
   kind: string
   description: string
   note?: string | null
+  delay_s?: number | null
 }
 
 interface Outcome {
@@ -27,7 +28,7 @@ interface Outcome {
 type Part =
   | { kind: 'text'; text: string }
   | { kind: 'chart'; block: ChartBlock }
-  | { kind: 'proposal'; proposals: Proposal[]; expiresAt: number | null; status: 'pending' | 'approved' | 'rejected' | 'closed' }
+  | { kind: 'proposal'; proposals: Proposal[]; note: string | null; expiresAt: number | null; status: 'pending' | 'approved' | 'rejected' | 'closed' }
   | { kind: 'result'; approved: boolean; expired: boolean; outcomes: Outcome[] }
   | { kind: 'error'; text: string }
 
@@ -61,6 +62,8 @@ const KIND_TITLE: Record<string, string> = {
 
 const OUTCOME_LABEL: Record<string, string> = {
   success: 'Đã thực hiện',
+  scheduled: 'Đã hẹn giờ',
+  cancelled: 'Đã hủy lịch',
   rejected: 'Không thực hiện',
   blocked_by_policy: 'Bị lớp an toàn chặn',
   error: 'Lỗi',
@@ -84,6 +87,7 @@ function proposalPart(p: Record<string, unknown>, status: 'pending' | 'closed'):
   return {
     kind: 'proposal',
     proposals: (p.proposals as Proposal[]) ?? [],
+    note: typeof p.schedule_note === 'string' ? p.schedule_note : null,
     expiresAt: typeof p.expires_at === 'number' ? p.expires_at : null,
     status,
   }
@@ -677,7 +681,7 @@ function PartView({ part: p, voice, busy, onDecide, username }: { part: Part; vo
       <div className="proposal">
         {p.outcomes.map((o) => (
           <div key={o.id} style={{ fontSize: 13 }}>
-            <span className={`badge ${o.status === 'success' ? 'ok' : o.status === 'rejected' ? '' : 'crit'}`}>{OUTCOME_LABEL[o.status] ?? o.status}</span>{' '}
+            <span className={`badge ${o.status === 'success' ? 'ok' : o.status === 'scheduled' ? 'info' : o.status === 'rejected' ? '' : 'crit'}`}>{OUTCOME_LABEL[o.status] ?? o.status}</span>{' '}
             {o.text || o.description}
           </div>
         ))}
@@ -700,6 +704,11 @@ function PartView({ part: p, voice, busy, onDecide, username }: { part: Part; vo
           </li>
         ))}
       </ul>
+      {p.note && (
+        <div className="faint" style={{ fontSize: 12, display: 'flex', gap: 6 }}>
+          <Clock size={13} style={{ flex: 'none', marginTop: 2 }} /> {p.note}
+        </div>
+      )}
       {p.status === 'pending' ? (
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <button className="btn primary sm" onClick={() => onDecide(true)} disabled={busy}>

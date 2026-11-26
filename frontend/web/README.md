@@ -33,9 +33,9 @@ npm run lint       # oxlint
 
 | Đường dẫn | Nội dung |
 |-----------|----------|
-| `/` | Trạng thái an toàn, 4 cảm biến, điều khiển 3 thiết bị (chờ ESP32 `ack`), biểu đồ 30 phút, cảnh báo gần đây |
+| `/` | Trạng thái an toàn, 4 cảm biến, điều khiển 3 thiết bị (chờ ESP32 `ack`), **lệnh hẹn giờ** từ trợ lý AI (`/api/schedules`: đếm ngược, Hủy lịch), biểu đồ 30 phút, cảnh báo gần đây |
 | `/alerts` | Lọc theo mức / nguồn, "Đã xem", phản hồi đúng / báo giả (gửi tiếp sang memory của AI) |
 | `/stats` | Biểu đồ theo danh mục CLAUDE.md mục 6, gọi thẳng `/api/stats` (không qua AI) |
 | `/device-logs` | Nhật ký lệnh thiết bị mọi nguồn trong 30 ngày, tự nạp lại khi có thay đổi |
-| `/chat` | Trợ lý AI: stream SSE, trạng thái worker, biểu đồ trong chat, [Đồng ý] / [Hủy], lịch sử hội thoại, mic (Web Speech API, dự phòng ghi âm + STT server), đọc thành tiếng (giọng tiếng Việt của trình duyệt, dự phòng TTS server) |
+| `/chat` | Trợ lý AI: stream SSE, trạng thái worker, biểu đồ trong chat, [Đồng ý] / [Hủy] (kèm ghi chú lệnh nào chạy cùng lúc / hẹn giờ), lịch sử hội thoại, mic (Web Speech API, dự phòng ghi âm + STT server), đọc thành tiếng (giọng tiếng Việt của trình duyệt, dự phòng TTS server) |
 | `/settings` | Ngưỡng ESP32 (kiểm tra như firmware, chờ ESP32 xác nhận qua `status/config`), memory cá nhân (xem / xóa), kiến thức chung về kho, giao diện, tự đọc câu trả lời |

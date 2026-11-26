@@ -117,3 +117,12 @@ export function fmtDuration(sec: number) {
 }
 
 export const WEEKDAY_SHORT = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN']
+
+/** Đếm ngược tới lệnh hẹn giờ: 75 -> "1:15", 3700 -> "1:01:40". */
+export function fmtCountdown(sec: number): string {
+  const s = Math.max(0, Math.round(sec))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const ss = String(s % 60).padStart(2, '0')
+  return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`
+}

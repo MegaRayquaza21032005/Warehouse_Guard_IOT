@@ -13,6 +13,7 @@ import type {
   DeviceName,
   LiveState,
   MemoryItem,
+  ScheduledCommand,
   StatsQuery,
   StatsResponse,
   TimelineSegment,
@@ -262,6 +263,11 @@ export const alertsApi = {
 export const memoriesApi = {
   mine: () => request<MemoryItem[]>('/api/memories'),
   deleteMine: (key: string) => request(`/api/memories/${encodeURIComponent(key)}`, { method: 'DELETE' }),
+}
+
+export const schedulesApi = {
+  list: () => request<ScheduledCommand[]>('/api/schedules'),
+  cancel: (id: string) => request(`/api/schedules/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 }
 
 export const pushApi = {
