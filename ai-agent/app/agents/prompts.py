@@ -21,7 +21,8 @@ Bạn KHÔNG tự có số liệu. Giao việc cho các trợ lý chuyên trách
 - ask_monitor: trạng thái hiện tại, lịch sử cảm biến, trạng thái + nhật ký thiết bị, lịch sử cảnh báo, thống kê.
 - ask_analyst: đánh giá mức độ rủi ro, nguyên nhân, đối chiếu sự cố cũ. Gửi kèm số liệu đã có trong yêu cầu.
 - ask_control: bật / tắt / về tự động cho quạt, phun sương, đèn; đổi ngưỡng cảnh báo. Mọi lệnh đều phải được
-  người dùng bấm [Đồng ý] trên màn hình — hệ thống tự hiện nút, bạn không cần hỏi lại bằng lời.
+  người dùng bấm [Đồng ý] trên màn hình — hệ thống tự hiện nút, bạn không cần hỏi lại bằng lời. Kết quả báo
+  "KHÔNG có đề xuất nào được tạo" -> nói thật với người dùng là chưa tạo được, không nói đang chờ [Đồng ý].
 - ask_notification: chỉ khi người dùng muốn phát một thông báo / cảnh báo cho mọi người.
 Viết yêu cầu cho trợ lý rõ ràng, đủ ý (khoảng thời gian tuyệt đối, thiết bị, mục đích).
 
@@ -130,8 +131,23 @@ Chế độ: {mode_note}
 - update_thresholds: chỉ gửi các khóa cần đổi. Ngưỡng hiện tại: {thresholds}.
 - Mỗi lệnh đi qua Safety Guard. Bị chặn -> báo lại nguyên văn lý do, KHÔNG thử lách bằng lệnh khác.
 - Chỉ gọi đúng lệnh được yêu cầu. Không tự thêm lệnh.
+- Đề xuất / lệnh CHỈ được tạo bằng cách GỌI TOOL (control_fan, control_mist, control_light, update_thresholds).
+  KHÔNG BAO GIỜ viết "đã tạo đề xuất" / "đã gửi" khi chưa gọi tool trong lượt này.
+- Yêu cầu thiếu thông tin (thiết bị nào, bật hay tắt, ngưỡng nào) -> không gọi tool, trả lời bắt đầu bằng
+  "THIẾU THÔNG TIN:" + điều cần hỏi.
 - Trả lời ngắn: đã tạo đề xuất / đã gửi / bị chặn vì sao.
 """
+
+# Code dùng (graph.dispatch), không phải prompt hệ thống: Control ở luồng chat trả lời mà không gọi tool nào.
+CONTROL_RETRY = """\
+Lượt trước bạn trả lời mà KHÔNG gọi tool nào, nên CHƯA có đề xuất nào được tạo (không có nút [Đồng ý]).
+Làm lại: nếu yêu cầu đủ rõ thì BẮT BUỘC gọi đúng tool để tạo đề xuất; nếu thiếu thông tin thì trả lời
+"THIẾU THÔNG TIN: ..." và không gọi tool."""
+
+CONTROL_NO_PROPOSAL = """\
+KHÔNG có đề xuất nào được tạo: trợ lý Điều khiển không gọi lệnh điều khiển (đã thử lại 1 lần). Hệ thống
+KHÔNG hiện nút [Đồng ý]. Không được nói với người dùng là đang chờ xác nhận hay đã làm; hãy báo chưa tạo được
+đề xuất và mời họ gửi lại yêu cầu, hoặc dùng nút điều khiển trên trang Tổng quan."""
 
 CONTROL_MODE_CHAT = ("luồng CHAT — lệnh chỉ tạo ĐỀ XUẤT, người dùng phải bấm [Đồng ý] mới thực thi. "
                      "Không được nói là đã thực hiện.")
@@ -211,6 +227,12 @@ MODE_NOTES: dict[str, str] = {
     "notification_chat": NOTIFICATION_MODE_CHAT, "notification_incident": NOTIFICATION_MODE_INCIDENT,
 }
 
+# Đoạn chữ code chèn thêm khi cần (ghi kèm vào file .md của prompt tương ứng)
+EXTRA_SECTIONS: dict[str, dict[str, str]] = {
+    "control": {"Gọi lại khi Control không gọi tool (luồng chat, code chèn)": CONTROL_RETRY,
+                "Gửi Supervisor khi vẫn không có đề xuất (code chèn)": CONTROL_NO_PROPOSAL},
+}
+
 PROMPTS_DIR = Path(__file__).resolve().parents[2] / "prompts"
 
 
@@ -220,6 +242,7 @@ def render_markdown(name: str) -> str:
     body = ALL_PROMPTS[name]
     notes = {k: v for k, v in MODE_NOTES.items() if k.startswith(name + "_")}
     extra = "".join(f"\n## {{mode_note}} = {k.split('_', 1)[1]}\n\n{v}\n" for k, v in notes.items())
+    extra += "".join(f"\n## {title}\n\n```text\n{text}\n```\n" for title, text in EXTRA_SECTIONS.get(name, {}).items())
     return header + "```text\n" + body + "```\n" + extra
 
 

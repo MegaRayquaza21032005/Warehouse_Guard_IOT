@@ -13,6 +13,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
+from app.agents import prompts
 from app.agents.graph import build_graph, sanitize, split_for_summary
 from app.agents.llm import LLMCaller
 from app.agents.tools import Services
@@ -86,6 +87,8 @@ class MemLogger(ToolCallLogger):
         r["status"] = status
         r["history"].append(status)
         r["error"] = error
+        if result is not None:
+            r["result"] = result
         if confirmed_by is not None:
             r["confirmed_by"] = confirmed_by
 
@@ -176,6 +179,41 @@ async def test_fan_on_requires_confirmation_then_executes(env):
     # Supervisor nhận kết quả xác nhận trong ToolMessage
     tm = [m for m in out["messages"] if isinstance(m, ToolMessage)][-1]
     assert "NGƯỜI DÙNG ĐỒNG Ý" in tm.content and "ESP32 đã thực hiện" in tm.content
+
+
+async def test_control_without_tool_call_is_retried_then_proposes(env):
+    """LLM của Control viết "đã tạo đề xuất" mà không gọi tool -> thử lại 1 lần -> có đề xuất + nút [Đồng ý]."""
+    g, _, w_llm = env["make"](
+        [call("ask_control", {"task": "bật quạt 30 giây"}, "h1"), say("Đã bật quạt.")],
+        [say("Đã tạo đề xuất bật quạt 30 giây, chờ bạn bấm [Đồng ý]."),          # lần 1: không gọi tool
+         call("control_fan", {"state": "on", "duration_s": 30}, "w1"), say("Đã tạo đề xuất")])
+    out = await g.ainvoke(chat_input("bật quạt 30s cho tôi"), CFG)
+    intr = out["__interrupt__"][0].value
+    assert intr["proposals"][0]["tool"] == "control_fan" and env["mqtt"].sent == []
+    assert prompts.CONTROL_RETRY in w_llm.inputs[1][1].content               # lần 2: task kèm lời nhắc bắt buộc gọi tool
+    sup = next(r for r in env["logger"].rows.values() if r["tool"] == "ask_control")
+    assert sup["result"]["retried"] is True and sup["result"]["proposals"] == 1
+
+
+async def test_control_still_without_tool_call_tells_supervisor_no_proposal(env):
+    g, s_llm, _ = env["make"](
+        [call("ask_control", {"task": "bật quạt 30 giây"}, "h1"), say("Chưa tạo được đề xuất, bạn gửi lại nhé.")],
+        [say("Đã tạo đề xuất bật quạt."), say("Đã tạo đề xuất bật quạt.")])     # cả 2 lần đều không gọi tool
+    out = await g.ainvoke(chat_input("bật quạt 30s"), CFG)
+    assert "__interrupt__" not in out and env["mqtt"].sent == []
+    tm = [m for m in out["messages"] if isinstance(m, ToolMessage)][-1]
+    assert tm.content == prompts.CONTROL_NO_PROPOSAL                          # Supervisor không nhận câu sai
+    assert prompts.CONTROL_NO_PROPOSAL in [m.content for m in s_llm.inputs[1] if isinstance(m, ToolMessage)]
+
+
+async def test_control_asking_for_details_is_not_retried(env):
+    g, _, w_llm = env["make"](
+        [call("ask_control", {"task": "bật cái đó"}, "h1"), say("Bạn muốn bật thiết bị nào?")],
+        [say("THIẾU THÔNG TIN: cần biết bật quạt, phun sương hay đèn.")])
+    out = await g.ainvoke(chat_input("bật cái đó lên"), CFG)
+    assert "__interrupt__" not in out and len(w_llm.inputs) == 1             # không gọi lại
+    tm = [m for m in out["messages"] if isinstance(m, ToolMessage)][-1]
+    assert tm.content.startswith("THIẾU THÔNG TIN")
 
 
 async def test_cancel_does_nothing_but_is_logged(env):

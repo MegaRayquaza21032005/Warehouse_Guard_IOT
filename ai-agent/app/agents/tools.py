@@ -50,6 +50,7 @@ class RunContext:
     proposals: list[dict[str, Any]] = field(default_factory=list)
     alert_content: dict[str, Any] | None = None
     current_call_id: str | None = None         # tool_call_id của lệnh giao việc đang chạy
+    tool_calls: int = 0                        # số tool worker đã gọi (phát hiện "nói đã làm mà không gọi tool")
 
 
 @dataclass

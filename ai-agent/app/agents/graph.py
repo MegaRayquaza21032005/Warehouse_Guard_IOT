@@ -133,6 +133,13 @@ def split_for_summary(messages: list[AnyMessage], keep: int) -> int:
     return 0
 
 
+def _skipped_write_tool(worker: str, ctx: RunContext, text: str) -> bool:
+    """Control ở luồng chat trả lời mà không gọi tool nào (nên không có đề xuất / nút [Đồng ý]).
+    Trả lời "THIẾU THÔNG TIN" là hợp lệ (cần hỏi lại người dùng), không tính."""
+    return (worker == "control" and ctx.flow == "chat" and ctx.tool_calls == 0 and not ctx.proposals
+            and not text.lstrip().upper().startswith("THIẾU THÔNG TIN"))
+
+
 # ============================================================================================ worker
 class WorkerRunner:
     def __init__(self, services: Services, caller: LLMCaller, llm: Any, model_name: str):
@@ -160,6 +167,7 @@ class WorkerRunner:
             if not ai.tool_calls:
                 return text_of(ai) or "(không có nội dung)"
             calls = ai.tool_calls
+            ctx.tool_calls += len(calls)
             if worker in WRITE_WORKERS:           # tool ghi chạy tuần tự
                 results = [await self._invoke(worker, by_name, tc, ctx) for tc in calls]
             else:
@@ -346,7 +354,21 @@ def build_graph(services: Services, caller: LLMCaller, supervisor_llm: Any, supe
                               current_call_id=tc["id"])
             try:
                 text = await asyncio.wait_for(runner.run(worker, task, wctx), s.worker_timeout_s)
-                await logger.update(call, "success", result={"text": text[:800], "proposals": len(wctx.proposals)})
+                retried = False
+                if _skipped_write_tool(worker, wctx, text):
+                    # LLM viết "đã tạo đề xuất" mà không gọi tool -> không có nút [Đồng ý]. Thử lại 1 lần, rồi
+                    # báo Supervisor câu cố định để nó không nói sai với người dùng.
+                    log.warning("Control trả lời mà không gọi tool (0 đề xuất) — thử lại 1 lần: %s", task[:120])
+                    retried = True
+                    text = await asyncio.wait_for(runner.run(worker, f"{task}\n\n{prompts.CONTROL_RETRY}", wctx),
+                                                  s.worker_timeout_s)
+                    if _skipped_write_tool(worker, wctx, text):
+                        log.warning("Control vẫn không gọi tool sau khi thử lại — báo Supervisor: không có đề xuất")
+                        text = prompts.CONTROL_NO_PROPOSAL
+                result = {"text": text[:800], "proposals": len(wctx.proposals)}
+                if retried:
+                    result["retried"] = True
+                await logger.update(call, "success", result=result)
             except asyncio.TimeoutError:
                 text = f"Trợ lý {WORKER_VI[worker]} quá thời gian ({s.worker_timeout_s}s), chưa có kết quả."
                 await logger.update(call, "error", error="timeout")
